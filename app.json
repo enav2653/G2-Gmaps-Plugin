@@ -1,0 +1,10 @@
+{
+  "name": "G2 Maps",
+  "packageName": "com.yourname.g2maps",
+  "version": "0.2.0",
+  "description": "Turn-by-turn Google Maps navigation HUD for G2 glasses",
+  "author": "Your Name",
+  "icon": "public/icon.png",
+  "entry": "index.html",
+  "permissions": ["location", "network"]
+}

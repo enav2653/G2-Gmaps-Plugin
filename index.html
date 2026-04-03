@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>G2 Maps</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0f0f14;
+      --surface: #1a1a22;
+      --border:  rgba(255,255,255,0.08);
+      --text:    #e8e8f0;
+      --muted:   #666680;
+      --accent:  #378ADD;
+      --green:   #4ade80;
+      --amber:   #c89050;
+      --red:     #f08080;
+    }
+
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: var(--bg); color: var(--text); min-height: 100dvh;
+           display: flex; flex-direction: column; }
+
+    /* ── Tab bar ── */
+    .tabs { display: flex; border-bottom: 0.5px solid var(--border); }
+    .tab  { flex: 1; padding: 14px 0 12px; font-size: 13px; color: var(--muted);
+            text-align: center; cursor: pointer; border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s; }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Panels ── */
+    .panel { display: none; flex: 1; flex-direction: column; overflow-y: auto; }
+    .panel.active { display: flex; }
+
+    /* ── Nav panel ── */
+    .nav-search { padding: 16px; }
+    .search-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+                    color: var(--muted); margin-bottom: 6px; }
+    .search-input { width: 100%; background: var(--surface); border: 0.5px solid var(--border);
+                    border-radius: 10px; color: var(--text); font-size: 15px;
+                    padding: 11px 14px; outline: none; transition: border-color 0.15s; }
+    .search-input:focus { border-color: var(--accent); }
+    .search-input::placeholder { color: var(--muted); }
+
+    .suggestions { margin: 6px 16px 0; background: var(--surface);
+                   border: 0.5px solid var(--border); border-radius: 10px;
+                   overflow: hidden; display: none; }
+    .suggestions.open { display: block; }
+    .suggestion { padding: 11px 14px; cursor: pointer; border-bottom: 0.5px solid var(--border); }
+    .suggestion:last-child { border-bottom: none; }
+    .suggestion:active { background: rgba(255,255,255,0.04); }
+    .sug-name { font-size: 14px; }
+    .sug-addr { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    .selected-dest { margin: 10px 16px 0; padding: 10px 14px; background: rgba(55,138,221,0.08);
+                     border: 0.5px solid rgba(55,138,221,0.2); border-radius: 10px;
+                     font-size: 13px; color: var(--accent); display: none; }
+    .selected-dest.open { display: block; }
+
+    .go-btn { margin: 14px 16px 0; padding: 14px; background: var(--accent); border: none;
+              border-radius: 12px; color: #fff; font-size: 15px; font-weight: 600;
+              cursor: pointer; transition: opacity 0.15s; }
+    .go-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .go-btn:active:not(:disabled) { opacity: 0.85; }
+
+    /* ── Status bar ── */
+    .status { padding: 12px 16px; font-size: 12px; color: var(--muted);
+              border-top: 0.5px solid var(--border); margin-top: auto; }
+    .status.active { color: var(--green); }
+    .status.error  { color: var(--red); }
+    .status.warn   { color: var(--amber); }
+
+    /* ── Menu panel (double-tap actions) ── */
+    .menu-section { padding: 14px 16px 6px; font-size: 10px; text-transform: uppercase;
+                    letter-spacing: 0.08em; color: var(--muted); }
+    .menu-item { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+                 border-bottom: 0.5px solid var(--border); cursor: pointer;
+                 transition: background 0.1s; }
+    .menu-item:active { background: rgba(255,255,255,0.04); }
+    .menu-item:last-child { border-bottom: none; }
+    .menu-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .menu-text { flex: 1; }
+    .menu-title { font-size: 14px; }
+    .menu-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .menu-item.danger .menu-title { color: var(--red); }
+    .menu-active-pill { font-size: 10px; padding: 3px 8px; border-radius: 20px;
+                        background: rgba(55,138,221,0.15); color: var(--accent);
+                        border: 0.5px solid rgba(55,138,221,0.25); }
+
+    /* ── Settings panel ── */
+    .settings-section { padding: 14px 16px 6px; font-size: 10px; text-transform: uppercase;
+                         letter-spacing: 0.08em; color: var(--muted); }
+    .setting-row { padding: 12px 16px; border-bottom: 0.5px solid var(--border); }
+    .setting-row:last-of-type { border-bottom: none; }
+    .setting-head { display: flex; align-items: center; justify-content: space-between;
+                    margin-bottom: 8px; }
+    .setting-label { font-size: 13px; color: var(--text); }
+    .setting-val   { font-size: 13px; font-weight: 500; color: var(--text); min-width: 40px; text-align: right; }
+
+    input[type=range] { width: 100%; accent-color: var(--accent); }
+
+    .toggle-row { display: flex; align-items: center; justify-content: space-between;
+                  padding: 13px 16px; border-bottom: 0.5px solid var(--border); }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-info .toggle-label { font-size: 13px; }
+    .toggle-info .toggle-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+    .toggle input { opacity:0; width:0; height:0; position:absolute; }
+    .toggle-bg { position:absolute; inset:0; background:rgba(255,255,255,0.12);
+                 border-radius:11px; transition:background 0.2s; cursor:pointer; }
+    .toggle input:checked + .toggle-bg { background: var(--accent); }
+    .toggle-thumb { position:absolute; top:3px; left:3px; width:16px; height:16px;
+                    background:#fff; border-radius:50%; transition:transform 0.2s; pointer-events:none; }
+    .toggle input:checked ~ .toggle-thumb { transform:translateX(18px); }
+
+    /* ── Preview screen ── */
+    .preview-wrap { padding: 14px 16px; }
+    .preview-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+                     color: var(--muted); margin-bottom: 10px; }
+    .preview-screen { position: relative; width: 100%; aspect-ratio: 576/200;
+                      background: #080810; border-radius: 6px; overflow: hidden;
+                      border: 0.5px solid rgba(255,255,255,0.12); }
+    .p-minimap { position: absolute; bottom: 3%; left: 1.5%; background: #12121e;
+                 border: 0.5px solid rgba(255,255,255,0.18); border-radius: 2px;
+                 overflow: hidden; transition: width 0.12s, height 0.12s, opacity 0.12s;
+                 transform-origin: bottom left; }
+    .p-minimap svg { width:100%; height:100%; display:block; }
+    .p-speed { position: absolute; right: 3%; top: 50%; transform: translateY(-50%);
+               text-align: center; display: flex; flex-direction: column;
+               align-items: center; gap: 2px; transition: opacity 0.12s; }
+    .p-speed-num   { font-weight: 500; color: #e8e8f0; line-height: 1; }
+    .p-speed-unit  { color: #8888a0; }
+    .p-speed-limit { border: 0.5px solid rgba(255,255,255,0.25); border-radius: 2px; color: #8888a0; }
+
+    /* ── Action buttons ── */
+    .action-row { display: flex; gap: 10px; padding: 14px 16px 0; }
+    .action-btn { flex: 1; padding: 11px; background: transparent;
+                  border: 0.5px solid var(--border); border-radius: 10px;
+                  color: var(--muted); font-size: 12px; cursor: pointer;
+                  transition: background 0.1s; }
+    .action-btn:hover { background: rgba(255,255,255,0.04); }
+    .action-btn.primary { background: var(--accent); border-color: var(--accent);
+                          color: #fff; font-weight: 500; }
+    .action-btn.primary:hover { opacity: 0.88; }
+    .bottom-pad { height: 16px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Tab bar ── -->
+<div class="tabs">
+  <div class="tab active" data-tab="nav">Navigate</div>
+  <div class="tab" data-tab="menu">Controls</div>
+  <div class="tab" data-tab="settings">HUD settings</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     TAB 1 — Navigate
+     ══════════════════════════════════════════ -->
+<div class="panel active" id="panel-nav">
+  <div class="nav-search">
+    <div class="search-label">Destination</div>
+    <input class="search-input" id="dest-input" type="text"
+           placeholder="Search address or place…"
+           autocomplete="off" autocorrect="off" spellcheck="false"/>
+  </div>
+  <div class="suggestions" id="suggestions"></div>
+  <div class="selected-dest" id="selected-dest"></div>
+  <button class="go-btn" id="go-btn" disabled>Navigate on G2</button>
+  <div class="status" id="status">Enter a destination to begin</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     TAB 2 — Controls (double-tap menu on phone)
+     ══════════════════════════════════════════ -->
+<div class="panel" id="panel-menu">
+  <div class="menu-section">Navigation</div>
+
+  <div class="menu-item" id="mi-pause">
+    <div class="menu-dot" style="background:var(--amber)"></div>
+    <div class="menu-text">
+      <div class="menu-title" id="mi-pause-title">Pause navigation</div>
+      <div class="menu-sub">GPS tracking stops</div>
+    </div>
+    <div class="menu-active-pill" id="mi-pause-pill" style="display:none">active</div>
+  </div>
+
+  <div class="menu-item" id="mi-passive">
+    <div class="menu-dot" style="background:var(--accent)"></div>
+    <div class="menu-text">
+      <div class="menu-title" id="mi-passive-title">Passive map mode</div>
+      <div class="menu-sub">Minimap + speed only, no directions</div>
+    </div>
+    <div class="menu-active-pill" id="mi-passive-pill" style="display:none">active</div>
+  </div>
+
+  <div class="menu-item danger" id="mi-end">
+    <div class="menu-dot" style="background:var(--red)"></div>
+    <div class="menu-text">
+      <div class="menu-title">End navigation</div>
+      <div class="menu-sub">Clears route and destination</div>
+    </div>
+  </div>
+
+  <div class="menu-section" style="margin-top:8px">Banner mode</div>
+
+  <div class="menu-item" id="mi-banner">
+    <div class="menu-dot" style="background:#888"></div>
+    <div class="menu-text">
+      <div class="menu-title" id="mi-banner-title">Always on</div>
+      <div class="menu-sub">Tap glasses to cycle: on → auto → off</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     TAB 3 — HUD Settings
+     ══════════════════════════════════════════ -->
+<div class="panel" id="panel-settings">
+
+  <div class="settings-section">Minimap</div>
+
+  <div class="setting-row">
+    <div class="setting-head">
+      <span class="setting-label">Size</span>
+      <span class="setting-val" id="map-size-val">100%</span>
+    </div>
+    <input type="range" id="map-size" min="50" max="150" step="1" value="100">
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-head">
+      <span class="setting-label">Brightness</span>
+      <span class="setting-val" id="map-bright-val">100%</span>
+    </div>
+    <input type="range" id="map-bright" min="20" max="100" step="1" value="100">
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Show minimap</div>
+      <div class="toggle-sub">Hide to free the bottom-left corner</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="map-visible" checked>
+      <div class="toggle-bg"></div>
+      <div class="toggle-thumb"></div>
+    </label>
+  </div>
+
+  <div class="settings-section">Speed readout</div>
+
+  <div class="setting-row">
+    <div class="setting-head">
+      <span class="setting-label">Size</span>
+      <span class="setting-val" id="spd-size-val">100%</span>
+    </div>
+    <input type="range" id="spd-size" min="50" max="150" step="1" value="100">
+  </div>
+
+  <div class="setting-row">
+    <div class="setting-head">
+      <span class="setting-label">Brightness</span>
+      <span class="setting-val" id="spd-bright-val">100%</span>
+    </div>
+    <input type="range" id="spd-bright" min="20" max="100" step="1" value="100">
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Show speed limit badge</div>
+      <div class="toggle-sub">Requires speed limit data from Google</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="limit-visible" checked>
+      <div class="toggle-bg"></div>
+      <div class="toggle-thumb"></div>
+    </label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Show speed readout</div>
+      <div class="toggle-sub">Current vehicle speed</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="spd-visible" checked>
+      <div class="toggle-bg"></div>
+      <div class="toggle-thumb"></div>
+    </label>
+  </div>
+
+  <!-- Live preview -->
+  <div class="preview-wrap">
+    <div class="preview-label">Live preview</div>
+    <div class="preview-screen">
+      <div class="p-minimap" id="p-minimap">
+        <svg viewBox="0 0 68 88" xmlns="http://www.w3.org/2000/svg">
+          <rect width="68" height="88" fill="#12121e"/>
+          <rect x="0" y="42" width="68" height="5" fill="#2a2a3e"/>
+          <rect x="30" y="0" width="5" height="88" fill="#2a2a3e"/>
+          <line x1="0" y1="18" x2="32" y2="44" stroke="#2a2a3e" stroke-width="3"/>
+          <rect x="2" y="2" width="25" height="37" rx="1" fill="#1a1a2e"/>
+          <rect x="38" y="2" width="28" height="37" rx="1" fill="#1a1a2e"/>
+          <rect x="38" y="50" width="28" height="35" rx="1" fill="#1a1a2e"/>
+          <rect x="2" y="50" width="25" height="35" rx="1" fill="#1a1a2e"/>
+          <polygon points="34,32 29,44 39,44" fill="#378ADD" opacity="0.5"/>
+          <circle cx="34" cy="44" r="4" fill="#378ADD" opacity="0.9"/>
+          <text x="62" y="10" font-size="7" fill="#444460" text-anchor="end" font-family="sans-serif">N</text>
+        </svg>
+      </div>
+      <div class="p-speed" id="p-speed">
+        <div class="p-speed-num" id="p-speed-num" style="font-size:18px">28</div>
+        <div class="p-speed-unit" id="p-speed-unit" style="font-size:8px">mph</div>
+        <div class="p-speed-limit" id="p-speed-limit" style="font-size:8px;padding:1px 5px">35</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-row">
+    <button class="action-btn" id="reset-btn">Reset defaults</button>
+    <button class="action-btn primary" id="save-btn">Save to glasses</button>
+  </div>
+  <div class="status" id="settings-status" style="border-top:none"></div>
+  <div class="bottom-pad"></div>
+</div>
+
+<script type="module">
+  import { geocode }           from './src/maps.ts'
+  import { startNavigation, menuPauseResume, menuPassiveMode, menuEndNavigation, reloadSettings } from './src/main.ts'
+  import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './src/settings.ts'
+
+  const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab, .panel').forEach(el => el.classList.remove('active'))
+      tab.classList.add('active')
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active')
+    })
+  })
+
+  // When glasses double-tap fires, switch to controls tab
+  window.addEventListener('g2maps:showmenu', () => {
+    document.querySelectorAll('.tab, .panel').forEach(el => el.classList.remove('active'))
+    document.querySelector('[data-tab="menu"]').classList.add('active')
+    document.getElementById('panel-menu').classList.add('active')
+  })
+
+  // ── Nav tab ────────────────────────────────────────────────────────────────
+  const destInput   = document.getElementById('dest-input')
+  const suggestions = document.getElementById('suggestions')
+  const selectedEl  = document.getElementById('selected-dest')
+  const goBtn       = document.getElementById('go-btn')
+  const statusEl    = document.getElementById('status')
+
+  let selectedLocation = null
+  let debounce = null
+  let autocomplete = null
+
+  const script = document.createElement('script')
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`
+  script.onload = () => { autocomplete = new google.maps.places.AutocompleteService() }
+  document.head.appendChild(script)
+
+  destInput.addEventListener('input', () => {
+    clearTimeout(debounce)
+    selectedLocation = null
+    goBtn.disabled = true
+    selectedEl.classList.remove('open')
+    const q = destInput.value.trim()
+    if (q.length < 3) { suggestions.innerHTML = ''; suggestions.classList.remove('open'); return }
+    debounce = setTimeout(() => fetchSuggestions(q), 300)
+  })
+
+  function fetchSuggestions(q) {
+    if (!autocomplete) return
+    autocomplete.getPlacePredictions({ input: q, types: ['geocode','establishment'] }, (preds, status) => {
+      if (status !== google.maps.places.PlacesServiceStatus.OK || !preds) {
+        suggestions.classList.remove('open'); return
+      }
+      suggestions.innerHTML = preds.slice(0,5).map(p => `
+        <div class="suggestion" data-place-id="${p.place_id}">
+          <div class="sug-name">${p.structured_formatting.main_text}</div>
+          <div class="sug-addr">${p.structured_formatting.secondary_text ?? ''}</div>
+        </div>`).join('')
+      suggestions.classList.add('open')
+      suggestions.querySelectorAll('.suggestion').forEach(el => {
+        el.addEventListener('click', () => selectPlace(el.dataset.placeId, el.querySelector('.sug-name').textContent))
+      })
+    })
+  }
+
+  function selectPlace(placeId, name) {
+    new google.maps.Geocoder().geocode({ placeId }, (results, status) => {
+      if (status !== 'OK' || !results[0]) return
+      const loc = results[0].geometry.location
+      selectedLocation = { lat: loc.lat(), lng: loc.lng(), label: results[0].formatted_address }
+      destInput.value = name
+      suggestions.innerHTML = ''; suggestions.classList.remove('open')
+      selectedEl.textContent = selectedLocation.label
+      selectedEl.classList.add('open')
+      goBtn.disabled = false
+    })
+  }
+
+  goBtn.addEventListener('click', async () => {
+    if (!selectedLocation) {
+      setStatus('Geocoding…', '')
+      try { selectedLocation = await geocode(destInput.value.trim()) }
+      catch { setStatus('Address not found', 'error'); return }
+    }
+    sessionStorage.setItem('g2maps_destination', JSON.stringify(selectedLocation))
+    setStatus(`Routing to ${selectedLocation.label}…`, 'active')
+    goBtn.disabled = true
+    try {
+      await startNavigation()
+      setStatus('Navigation active — watch your glasses', 'active')
+    } catch(e) {
+      setStatus('Error: ' + e.message, 'error')
+      goBtn.disabled = false
+    }
+  })
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg
+    statusEl.className = 'status ' + cls
+  }
+
+  // ── Controls tab ───────────────────────────────────────────────────────────
+  let isPaused  = false
+  let isPassive = false
+
+  document.getElementById('mi-pause').addEventListener('click', async () => {
+    await menuPauseResume()
+    isPaused = !isPaused
+    document.getElementById('mi-pause-title').textContent = isPaused ? 'Resume navigation' : 'Pause navigation'
+    document.getElementById('mi-pause-pill').style.display = isPaused ? '' : 'none'
+    if (isPaused) { isPassive = false; syncPassiveUI() }
+  })
+
+  document.getElementById('mi-passive').addEventListener('click', async () => {
+    await menuPassiveMode()
+    isPassive = !isPassive
+    document.getElementById('mi-passive-title').textContent = isPassive ? 'Back to navigation' : 'Passive map mode'
+    document.getElementById('mi-passive-pill').style.display = isPassive ? '' : 'none'
+    if (isPassive) { isPaused = false; syncPassiveUI() }
+  })
+
+  function syncPassiveUI() {
+    document.getElementById('mi-pause-title').textContent = isPaused ? 'Resume navigation' : 'Pause navigation'
+    document.getElementById('mi-pause-pill').style.display = isPaused ? '' : 'none'
+  }
+
+  document.getElementById('mi-end').addEventListener('click', async () => {
+    await menuEndNavigation()
+    isPaused = false; isPassive = false; syncPassiveUI()
+    document.getElementById('mi-passive-title').textContent = 'Passive map mode'
+    document.getElementById('mi-passive-pill').style.display = 'none'
+    setStatus('Navigation ended', 'warn')
+    document.querySelectorAll('.tab, .panel').forEach(el => el.classList.remove('active'))
+    document.querySelector('[data-tab="nav"]').classList.add('active')
+    document.getElementById('panel-nav').classList.add('active')
+  })
+
+  // ── Settings tab ───────────────────────────────────────────────────────────
+  const settingsEls = {
+    mapSize:      document.getElementById('map-size'),
+    mapBright:    document.getElementById('map-bright'),
+    mapVisible:   document.getElementById('map-visible'),
+    spdSize:      document.getElementById('spd-size'),
+    spdBright:    document.getElementById('spd-bright'),
+    spdVisible:   document.getElementById('spd-visible'),
+    limitVisible: document.getElementById('limit-visible'),
+  }
+
+  function loadUIFromSettings() {
+    const s = loadSettings()
+    settingsEls.mapSize.value      = s.minimap.size
+    settingsEls.mapBright.value    = s.minimap.brightness
+    settingsEls.mapVisible.checked = s.minimap.visible
+    settingsEls.spdSize.value      = s.speed.size
+    settingsEls.spdBright.value    = s.speed.brightness
+    settingsEls.spdVisible.checked = s.speed.visible
+    settingsEls.limitVisible.checked = s.speed.showLimit
+    updatePreview()
+  }
+
+  function updatePreview() {
+    const ms = parseInt(settingsEls.mapSize.value)
+    const mb = parseInt(settingsEls.mapBright.value)
+    const mv = settingsEls.mapVisible.checked
+    const ss = parseInt(settingsEls.spdSize.value)
+    const sb = parseInt(settingsEls.spdBright.value)
+    const sv = settingsEls.spdVisible.checked
+    const lv = settingsEls.limitVisible.checked
+
+    document.getElementById('map-size-val').textContent   = ms + '%'
+    document.getElementById('map-bright-val').textContent = mb + '%'
+    document.getElementById('spd-size-val').textContent   = ss + '%'
+    document.getElementById('spd-bright-val').textContent = sb + '%'
+
+    const scr   = document.querySelector('.preview-screen')
+    const scrH  = scr.offsetHeight || 110
+    const mapWpx = (80 * ms / 100) / (88 * ms / 100) * (88 * ms / 100 / 288 * scrH)
+    const mapHpx = (88 * ms / 100) / 288 * scrH
+
+    const pm = document.getElementById('p-minimap')
+    pm.style.width   = Math.max(12, mapWpx) + 'px'
+    pm.style.height  = Math.max(12, mapHpx) + 'px'
+    pm.style.opacity = mv ? (mb / 100) : 0
+
+    const ps = document.getElementById('p-speed')
+    ps.style.opacity = sv ? (sb / 100) : 0
+
+    const numPx  = Math.max(8, (scrH / 288) * 22 * ss / 100)
+    const unitPx = Math.max(6, (scrH / 288) * 9  * ss / 100)
+    const limPx  = Math.max(6, (scrH / 288) * 8  * ss / 100)
+
+    document.getElementById('p-speed-num').style.fontSize   = numPx  + 'px'
+    document.getElementById('p-speed-unit').style.fontSize  = unitPx + 'px'
+    document.getElementById('p-speed-limit').style.fontSize = limPx  + 'px'
+    document.getElementById('p-speed-limit').style.padding  = `${limPx*0.15}px ${limPx*0.6}px`
+    document.getElementById('p-speed-limit').style.display  = lv ? '' : 'none'
+  }
+
+  Object.values(settingsEls).forEach(el => el.addEventListener('input', updatePreview))
+
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    const d = DEFAULT_SETTINGS
+    settingsEls.mapSize.value        = d.minimap.size
+    settingsEls.mapBright.value      = d.minimap.brightness
+    settingsEls.mapVisible.checked   = d.minimap.visible
+    settingsEls.spdSize.value        = d.speed.size
+    settingsEls.spdBright.value      = d.speed.brightness
+    settingsEls.spdVisible.checked   = d.speed.visible
+    settingsEls.limitVisible.checked = d.speed.showLimit
+    updatePreview()
+  })
+
+  document.getElementById('save-btn').addEventListener('click', async () => {
+    const s = {
+      minimap: {
+        size:       parseInt(settingsEls.mapSize.value),
+        brightness: parseInt(settingsEls.mapBright.value),
+        visible:    settingsEls.mapVisible.checked,
+      },
+      speed: {
+        size:       parseInt(settingsEls.spdSize.value),
+        brightness: parseInt(settingsEls.spdBright.value),
+        visible:    settingsEls.spdVisible.checked,
+        showLimit:  settingsEls.limitVisible.checked,
+      },
+    }
+    saveSettings(s)
+    await reloadSettings()
+    const el = document.getElementById('settings-status')
+    el.textContent = 'Saved — glasses updated'
+    el.className = 'status active'
+    setTimeout(() => { el.textContent = ''; el.className = 'status' }, 2500)
+  })
+
+  loadUIFromSettings()
+</script>
+</body>
+</html>
