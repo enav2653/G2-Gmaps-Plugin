@@ -1,6 +1,6 @@
 # G2 Maps
 
-Google Maps navigation HUD for the Even Realities G2 smart glasses.
+Google Maps navigation HUD for the Even Realities G2 smart glasses. 
 
 Turn-by-turn directions, a live minimap, and a speed readout beam directly to your lenses — designed around the Android Auto HUD pattern with a permanently clear center so you stay aware of your environment.
 
