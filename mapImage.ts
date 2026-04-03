@@ -39,8 +39,8 @@ export async function imageToGreyscaleBytes(blob: Blob, w: number, h: number): P
     const luma   = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
     const nibble = Math.min(15, Math.round((luma / 255) * 15))
     const bi     = Math.floor(i / 2)
-    if (i % 2 === 0) out[bi]  = nibble << 4
-    else             out[bi] |= nibble & 0x0f
+    if (i % 2 === 0) { out[bi] = nibble << 4; continue }
+    out[bi] |= nibble & 0x0f
   }
 
   return out

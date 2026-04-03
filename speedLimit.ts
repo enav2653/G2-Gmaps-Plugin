@@ -115,18 +115,9 @@ export async function getSpeedLimitMph(lat: number, lng: number): Promise<number
     const placeId = await nearestRoadPlaceId(lat, lng)
     if (!placeId) return null
 
-    // Same segment as before — use cache
-    if (placeId === currentPlaceId && limitCache.has(placeId)) {
-      return limitCache.get(placeId) ?? null
-    }
-
-    // New segment — fetch and cache
     currentPlaceId = placeId
 
-    if (limitCache.has(placeId)) {
-      // We've been on this segment before (e.g. a loop route)
-      return limitCache.get(placeId) ?? null
-    }
+    if (limitCache.has(placeId)) return limitCache.get(placeId) ?? null
 
     const limit = await fetchSpeedLimit(placeId)
     limitCache.set(placeId, limit)

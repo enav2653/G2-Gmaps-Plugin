@@ -38,21 +38,18 @@ export async function getRoute(origin: LatLng, destination: LatLng): Promise<Rou
   if (!res.ok) throw new Error(`Routes API ${res.status}: ${await res.text()}`)
 
   const data = await res.json()
-  const steps: RouteStep[] = []
+  const legs: any[] = data?.routes?.[0]?.legs ?? []
+  return legs.flatMap((leg: any) => (leg.steps ?? []).map(mapStep))
+}
 
-  for (const leg of data?.routes?.[0]?.legs ?? []) {
-    for (const step of leg.steps ?? []) {
-      steps.push({
-        instruction:     stripHtml(step.navigationInstruction?.instructions ?? 'Continue'),
-        distanceMeters:  step.distanceMeters ?? 0,
-        durationSeconds: parseDuration(step.staticDuration),
-        endLat:          step.endLocation?.latLng?.latitude  ?? 0,
-        endLng:          step.endLocation?.latLng?.longitude ?? 0,
-      })
-    }
+function mapStep(step: any): RouteStep {
+  return {
+    instruction:     stripHtml(step.navigationInstruction?.instructions ?? 'Continue'),
+    distanceMeters:  step.distanceMeters ?? 0,
+    durationSeconds: parseDuration(step.staticDuration),
+    endLat:          step.endLocation?.latLng?.latitude  ?? 0,
+    endLng:          step.endLocation?.latLng?.longitude ?? 0,
   }
-
-  return steps
 }
 
 export async function geocode(address: string): Promise<{ lat: number; lng: number; label: string }> {

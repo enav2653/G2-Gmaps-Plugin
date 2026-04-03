@@ -62,7 +62,9 @@ export type BannerMode = 'always-on' | 'as-needed' | 'always-off'
 export const BANNER_MODES: BannerMode[] = ['always-on', 'as-needed', 'always-off']
 
 export function bannerModeLabel(m: BannerMode): string {
-  return m === 'always-on' ? 'Banner: on' : m === 'as-needed' ? 'Banner: auto' : 'Banner: off'
+  if (m === 'always-on') return 'Banner: on'
+  if (m === 'as-needed') return 'Banner: auto'
+  return 'Banner: off'
 }
 
 // ─── Nav states ──────────────────────────────────────────────────────────────

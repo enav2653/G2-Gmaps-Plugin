@@ -158,15 +158,16 @@ function startGPS() {
         return
       }
 
-      if (stepped) {
-        // Step changed — rebuild page with fresh minimap
-        const mapBytes = await fetchMinimap()
-        await buildPage(mapBytes)
-      } else {
+      if (!stepped) {
         // Same step — refresh text in-place
         await refreshBanner()
         await refreshSpeed()   // speed number + limit both live here
+        return
       }
+
+      // Step changed — rebuild page with fresh minimap
+      const mapBytes = await fetchMinimap()
+      await buildPage(mapBytes)
     },
     (err) => console.error('GPS error', err),
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 },
@@ -249,19 +250,17 @@ function setupInput() {
 
       // Swipe up — previous step (manual review)
       case OsEventTypeList.SCROLL_TOP_EVENT: {
-        if (steps.length && stepIdx > 0) {
-          stepIdx--
-          await refreshBanner()
-        }
+        if (!steps.length || stepIdx <= 0) break
+        stepIdx--
+        await refreshBanner()
         break
       }
 
       // Swipe down — skip to next step
       case OsEventTypeList.SCROLL_BOTTOM_EVENT: {
-        if (steps.length && stepIdx < steps.length - 1) {
-          stepIdx++
-          await refreshBanner()
-        }
+        if (!steps.length || stepIdx >= steps.length - 1) break
+        stepIdx++
+        await refreshBanner()
         break
       }
     }
@@ -283,14 +282,18 @@ export async function menuPauseResume() {
 }
 
 export async function menuPassiveMode() {
-  if (navState === 'passive') {
-    // Return to navigation if we have a route
-    navState = steps.length ? 'navigating' : 'idle'
-    if (navState === 'navigating') startGPS()
-  } else {
+  if (navState !== 'passive') {
     navState = 'passive'
     stopGPS()
+    const mapBytes = await fetchMinimap()
+    await buildPage(mapBytes)
+    startMapRefresh()
+    return
   }
+
+  // Return to navigation if we have a route
+  navState = steps.length ? 'navigating' : 'idle'
+  if (navState === 'navigating') startGPS()
   const mapBytes = await fetchMinimap()
   await buildPage(mapBytes)
   startMapRefresh()
