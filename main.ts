@@ -1,8 +1,8 @@
 import {
   waitForEvenAppBridge,
   OsEventTypeList,
-  ImuReportPace,
   CreateStartUpPageContainer,
+  RebuildPageContainer,
   ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
@@ -42,10 +42,9 @@ let currentLat = 0
 let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
-let headingDeg = 0            // from IMU, degrees clockwise from north
-
 let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
+let pageCreated = false
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
 
@@ -109,11 +108,20 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   const speedContainer = buildSpeedContainer(speedContent, settings)
   if (speedContainer) textContainers.push(speedContainer)
 
-  await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
+  const containerData = {
     containerTotalNum: textContainers.length + imageContainers.length,
     textObject:        textContainers,
     imageObject:       imageContainers.length ? imageContainers : undefined,
-  }))
+  }
+
+  if (!pageCreated) {
+    const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+    pageCreated = true
+    reportStatus(`create: ${JSON.stringify(result)}`)
+  } else {
+    const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+    reportStatus(`rebuild: ${ok}`)
+  }
 
   // Upload map image after page is created (SDK requirement)
   if (!mapContainer || !mapBytes) return
@@ -231,18 +239,8 @@ function stopMapRefresh() {
 }
 
 // ─── IMU — heading tracking ───────────────────────────────────────────────────
-
-async function startIMU() {
-  await bridge.imuControl(true, ImuReportPace.P500)
-  bridge.onEvenHubEvent(event => {
-    const sys = event.sysEvent
-    if (!sys?.imuData) return
-    if (sys.eventType !== OsEventTypeList.IMU_DATA_REPORT) return
-    if (sys.imuData.y === undefined) return
-    // y-axis rotation approximates compass heading on G2
-    headingDeg = ((sys.imuData.y * 180 / Math.PI) + 360) % 360
-  })
-}
+// Disabled: headingDeg is not currently used in any display output.
+// Re-enable when minimap heading rotation is implemented.
 
 // ─── Touchpad input ───────────────────────────────────────────────────────────
 
@@ -337,6 +335,7 @@ export async function menuEndNavigation() {
   stepIdx  = 0
   navState = 'idle'
   sessionStorage.removeItem('g2maps_destination')
+  sessionStorage.removeItem('g2maps_origin')
   await buildPage(null)
 }
 
@@ -364,20 +363,36 @@ export async function startNavigation() {
   }
 
   navState = 'navigating'
-  await buildPage(null)   // show "calculating" state immediately
+  await buildPage(null)
 
-  const dest = JSON.parse(raw) as { lat: number; lng: number; label: string }
+  const dest   = JSON.parse(raw) as { lat: number; lng: number; label: string }
+  const rawOrg = sessionStorage.getItem('g2maps_origin')
 
   try {
-    const pos = await new Promise<GeolocationPosition>((res, rej) =>
-      navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true }),
-    )
+    if (rawOrg) {
+      const org  = JSON.parse(rawOrg) as { lat: number; lng: number; label: string }
+      currentLat = org.lat
+      currentLng = org.lng
+      reportStatus(`origin: ${org.label}`)
+    } else {
+      reportStatus('trying GPS…')
+      const pos = await new Promise<GeolocationPosition>((res, rej) => {
+        const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
+        navigator.geolocation.getCurrentPosition(
+          p => { clearTimeout(timer); res(p) },
+          e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
+          { enableHighAccuracy: false },
+        )
+      })
+      currentLat = pos.coords.latitude
+      currentLng = pos.coords.longitude
+      reportStatus(`GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+    }
 
-    currentLat = pos.coords.latitude
-    currentLng = pos.coords.longitude
-
+    reportStatus('fetching route…')
     steps   = await getRoute({ lat: currentLat, lng: currentLng }, { lat: dest.lat, lng: dest.lng })
     stepIdx = 0
+    reportStatus(`route: ${steps.length} steps`)
 
     if (!steps.length) {
       navState = 'idle'
@@ -392,10 +407,19 @@ export async function startNavigation() {
     startMapRefresh()
 
   } catch (err) {
-    console.error('Navigation start failed', err)
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus(`nav error: ${msg}`)
     navState = 'idle'
     await buildPage(null)
+    throw err
   }
+}
+
+// ─── Diagnostics ─────────────────────────────────────────────────────────────
+
+function reportStatus(msg: string) {
+  console.warn('[G2Maps]', msg)
+  window.dispatchEvent(new CustomEvent('g2maps:status', { detail: msg }))
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -404,7 +428,6 @@ async function init() {
   bridge = await waitForEvenAppBridge()
 
   setupInput()
-  await startIMU()
 
   bridge.onEvenHubEvent(event => {
     const sys = event.sysEvent
