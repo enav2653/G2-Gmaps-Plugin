@@ -335,6 +335,7 @@ export async function menuEndNavigation() {
   stepIdx  = 0
   navState = 'idle'
   sessionStorage.removeItem('g2maps_destination')
+  sessionStorage.removeItem('g2maps_origin')
   await buildPage(null)
 }
 
@@ -364,21 +365,29 @@ export async function startNavigation() {
   navState = 'navigating'
   await buildPage(null)
 
-  const dest = JSON.parse(raw) as { lat: number; lng: number; label: string }
+  const dest   = JSON.parse(raw) as { lat: number; lng: number; label: string }
+  const rawOrg = sessionStorage.getItem('g2maps_origin')
 
   try {
-    reportStatus(`geo available: ${!!navigator.geolocation}`)
-
-    const pos = await new Promise<GeolocationPosition>((res, rej) =>
-      navigator.geolocation.getCurrentPosition(res, rej, {
-        enableHighAccuracy: true,
-        timeout: 10000,
-      }),
-    )
-
-    reportStatus(`GPS: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`)
-    currentLat = pos.coords.latitude
-    currentLng = pos.coords.longitude
+    if (rawOrg) {
+      const org  = JSON.parse(rawOrg) as { lat: number; lng: number; label: string }
+      currentLat = org.lat
+      currentLng = org.lng
+      reportStatus(`origin: ${org.label}`)
+    } else {
+      reportStatus('trying GPS…')
+      const pos = await new Promise<GeolocationPosition>((res, rej) => {
+        const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
+        navigator.geolocation.getCurrentPosition(
+          p => { clearTimeout(timer); res(p) },
+          e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
+          { enableHighAccuracy: false },
+        )
+      })
+      currentLat = pos.coords.latitude
+      currentLng = pos.coords.longitude
+      reportStatus(`GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+    }
 
     reportStatus('fetching route…')
     steps   = await getRoute({ lat: currentLat, lng: currentLng }, { lat: dest.lat, lng: dest.lng })
@@ -398,10 +407,7 @@ export async function startNavigation() {
     startMapRefresh()
 
   } catch (err) {
-    const geo = err as GeolocationPositionError
-    const msg = geo?.code !== undefined
-      ? `geo error code ${geo.code}: ${geo.message}`
-      : (err instanceof Error ? err.message : String(err))
+    const msg = err instanceof Error ? err.message : String(err)
     reportStatus(`nav error: ${msg}`)
     navState = 'idle'
     await buildPage(null)
