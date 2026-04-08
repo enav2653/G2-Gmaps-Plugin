@@ -184,7 +184,6 @@ export function buildMinimapContainer(settings: HudSettings): ImageContainerProp
     yPosition:     y,
     width:         w,
     height:        h,
-    isEventCapture: 0,
   })
 }
 
