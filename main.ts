@@ -72,7 +72,9 @@ async function fetchMinimap(): Promise<number[] | null> {
     reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
     const blob   = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
     let pixels   = await imageToGreyscale4bit(blob, w, h)
-    reportStatus(`minimap pixels: ${pixels.length} range 0-15`)
+    const pMin = Math.min(...pixels.slice(0, 100))
+    const pMax = Math.max(...pixels.slice(0, 100))
+    reportStatus(`minimap px: ${pixels.length} sample min=${pMin} max=${pMax}`)
     const br = settings.minimap.brightness / 100
     if (br < 1) pixels = applyBrightness(pixels, br)
     return pixels
