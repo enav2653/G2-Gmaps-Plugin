@@ -3,6 +3,7 @@ import {
   OsEventTypeList,
   ImuReportPace,
   CreateStartUpPageContainer,
+  RebuildPageContainer,
   ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
@@ -46,6 +47,7 @@ let headingDeg = 0            // from IMU, degrees clockwise from north
 
 let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
+let pageCreated = false
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
 
@@ -109,11 +111,18 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   const speedContainer = buildSpeedContainer(speedContent, settings)
   if (speedContainer) textContainers.push(speedContainer)
 
-  await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
+  const containerData = {
     containerTotalNum: textContainers.length + imageContainers.length,
     textObject:        textContainers,
     imageObject:       imageContainers.length ? imageContainers : undefined,
-  }))
+  }
+
+  if (!pageCreated) {
+    await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+    pageCreated = true
+  } else {
+    await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+  }
 
   // Upload map image after page is created (SDK requirement)
   if (!mapContainer || !mapBytes) return
