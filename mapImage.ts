@@ -44,11 +44,25 @@ export async function imageToGreyscale4bit(blob: Blob, w: number, h: number): Pr
   ctx.drawImage(img, 0, 0, w, h)
 
   const { data } = ctx.getImageData(0, 0, w, h)
-  const out: number[] = new Array(w * h)
+  const lumas = new Float32Array(w * h)
 
+  // Compute luma for each pixel
   for (let i = 0; i < w * h; i++) {
-    const luma = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
-    out[i] = Math.min(15, Math.round(luma / 17))  // 255 / 17 ≈ 15
+    lumas[i] = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
+  }
+
+  // Contrast stretch: map [min…max] → [0…15] so the full greyscale range
+  // is used regardless of how bright/dark the source map tiles are.
+  let lo = 255, hi = 0
+  for (let i = 0; i < lumas.length; i++) {
+    if (lumas[i] < lo) lo = lumas[i]
+    if (lumas[i] > hi) hi = lumas[i]
+  }
+  const range = (hi - lo) || 1
+
+  const out: number[] = new Array(w * h)
+  for (let i = 0; i < w * h; i++) {
+    out[i] = Math.round(((lumas[i] - lo) / range) * 15)
   }
 
   return out
