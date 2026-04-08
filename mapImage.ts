@@ -23,12 +23,12 @@ export async function fetchMapSnapshot(lat: number, lng: number, opts: MapImageO
 }
 
 /**
- * Convert a PNG/JPEG blob to 4-bit greyscale packed bytes (2 pixels per byte,
- * high nibble first) as expected by bridge.updateImageRawData().
+ * Convert a PNG/JPEG blob to a flat number[] of 4-bit greyscale values (0–15),
+ * one integer per pixel — the format expected by ImageRawDataUpdate.imageData.
  *
- * Uses HTMLCanvasElement instead of OffscreenCanvas for WebView compatibility.
+ * The SDK receives List<int> on the host (Dart) side; values must be 0–15.
  */
-export async function imageToGreyscaleBytes(blob: Blob, w: number, h: number): Promise<Uint8Array> {
+export async function imageToGreyscale4bit(blob: Blob, w: number, h: number): Promise<number[]> {
   const url = URL.createObjectURL(blob)
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
@@ -44,11 +44,11 @@ export async function imageToGreyscaleBytes(blob: Blob, w: number, h: number): P
   ctx.drawImage(img, 0, 0, w, h)
 
   const { data } = ctx.getImageData(0, 0, w, h)
-  // 8-bit greyscale: 1 byte per pixel, values 0–255
-  const out = new Uint8Array(w * h)
+  const out: number[] = new Array(w * h)
 
   for (let i = 0; i < w * h; i++) {
-    out[i] = Math.round(0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2])
+    const luma = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
+    out[i] = Math.min(15, Math.round(luma / 17))  // 255 / 17 ≈ 15
   }
 
   return out

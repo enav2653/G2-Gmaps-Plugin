@@ -10,17 +10,16 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { fetchMapSnapshot } from './mapImage'
+import { fetchMapSnapshot, imageToGreyscale4bit } from './mapImage'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
-  buildEventContainer,
   buildBannerContainer,
   buildMinimapContainer,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
-
+  applyBrightness,
   minimapDims,
   BANNER_MODES, BannerMode,
   NavState,
@@ -66,17 +65,17 @@ function advanceStep(lat: number, lng: number): number {
 
 // ─── Map image fetch + brightness ────────────────────────────────────────────
 
-async function fetchMinimap(): Promise<Uint8Array | null> {
+async function fetchMinimap(): Promise<number[] | null> {
   if (!settings.minimap.visible) return null
   try {
     const { w, h } = minimapDims(settings)
     reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
-    const blob  = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
-    reportStatus(`minimap blob: ${blob.size} bytes (${blob.type})`)
-    // Pass PNG bytes directly — SDK decodes and converts to 4-bit greyscale internally
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    reportStatus(`minimap bytes: ${bytes.length}`)
-    return bytes
+    const blob   = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
+    let pixels   = await imageToGreyscale4bit(blob, w, h)
+    reportStatus(`minimap pixels: ${pixels.length} range 0-15`)
+    const br = settings.minimap.brightness / 100
+    if (br < 1) pixels = applyBrightness(pixels, br)
+    return pixels
   } catch (e) {
     reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
     return null
@@ -88,7 +87,7 @@ async function fetchMinimap(): Promise<Uint8Array | null> {
 // Called on first load, step change, settings change, or state change.
 // Tears down and rebuilds all containers.
 
-async function buildPage(mapBytes: Uint8Array | null = null) {
+async function buildPage(mapBytes: number[] | null = null) {
   const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
   const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 

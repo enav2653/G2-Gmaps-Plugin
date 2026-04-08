@@ -226,10 +226,6 @@ export function buildSpeedContainer(
  * Scales each 4-bit nibble in greyscale image bytes by a brightness factor.
  * brightness: 0.0–1.0
  */
-export function applyBrightness(bytes: Uint8Array, brightness: number): Uint8Array {
-  const out = new Uint8Array(bytes.length)
-  for (let i = 0; i < bytes.length; i++) {
-    out[i] = Math.round(bytes[i] * brightness)
-  }
-  return out
+export function applyBrightness(pixels: number[], brightness: number): number[] {
+  return pixels.map(v => Math.round(v * brightness))
 }
