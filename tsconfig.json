@@ -4,5 +4,5 @@
     "strict": true, "lib": ["ES2020","DOM","DOM.Iterable"],
     "skipLibCheck": true, "types": ["@types/google.maps"]
   },
-  "include": ["src"]
+  "include": ["."]
 }
