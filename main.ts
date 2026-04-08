@@ -46,21 +46,146 @@ let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
 let pageCreated = false
 
+// Cached reference to whichever Android/bridge location method worked
+let activeLocationProvider: (() => Promise<{ lat: number; lng: number } | null>) | null = null
+let androidPollTimer: ReturnType<typeof setInterval> | null = null
+
 // ─── Bridge location probe ────────────────────────────────────────────────────
 //
 // The Even Hub WebView blocks navigator.geolocation (PERMISSION_DENIED).
-// Probe undocumented callEvenApp methods that the Flutter host might expose.
+// Probe Flutter InAppWebView, Android JS interfaces, and callEvenApp.
+// Once a working provider is found it is cached in activeLocationProvider
+// so subsequent polls don't re-scan.
+
+function parseLocation(r: any): { lat: number; lng: number } | null {
+  if (r == null) return null
+  if (typeof r === 'string') {
+    try { r = JSON.parse(r) } catch { return null }
+  }
+  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng }
+  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude }
+  return null
+}
 
 async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null> {
-  const candidates = ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getPosition', 'location']
-  for (const method of candidates) {
-    try {
-      const r = await bridge.callEvenApp(method)
-      if (r?.lat != null && r?.lng != null)           return { lat: r.lat, lng: r.lng }
-      if (r?.latitude != null && r?.longitude != null) return { lat: r.latitude, lng: r.longitude }
-    } catch { /* method not available */ }
+  // If we already found a working provider, use it directly
+  if (activeLocationProvider) return activeLocationProvider()
+
+  // Log visible bridge-related window properties for diagnostics
+  const bridgeKeys = Object.keys(window).filter(k =>
+    /android|bridge|even|flutter|native|webkit/i.test(k)
+  )
+  reportStatus(`window bridge keys: [${bridgeKeys.join(', ')}]`)
+
+  // --- 1. Flutter InAppWebView callHandler ---
+  const fwv = (window as any).flutter_inappwebview
+  if (fwv?.callHandler) {
+    for (const method of ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getPosition']) {
+      try {
+        const r   = await fwv.callHandler(method)
+        const loc = parseLocation(r)
+        if (loc) {
+          reportStatus(`flutter_inappwebview.${method}: OK`)
+          activeLocationProvider = async () => {
+            try { return parseLocation(await fwv.callHandler(method)) } catch { return null }
+          }
+          return loc
+        }
+      } catch { }
+    }
   }
+
+  // --- 2. Android addJavascriptInterface objects ---
+  const ifaces = ['Android', 'EvenApp', 'EvenHub', 'JsBridge', 'AndroidBridge', 'NativeBridge']
+  for (const name of ifaces) {
+    const obj = (window as any)[name]
+    if (obj == null) continue
+    reportStatus(`found window.${name}`)
+    for (const method of ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getLatLng', 'getPosition']) {
+      if (typeof obj[method] !== 'function') continue
+      try {
+        const r   = obj[method]()
+        const loc = parseLocation(r)
+        if (loc) {
+          reportStatus(`window.${name}.${method}(): OK`)
+          activeLocationProvider = () => {
+            try { return Promise.resolve(parseLocation(obj[method]())) } catch { return Promise.resolve(null) }
+          }
+          return loc
+        }
+      } catch { }
+    }
+  }
+
+  // --- 3. SDK callEvenApp (undocumented method names) ---
+  for (const method of ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getPosition', 'location']) {
+    try {
+      const r   = await bridge.callEvenApp(method)
+      const loc = parseLocation(r)
+      if (loc) {
+        reportStatus(`callEvenApp(${method}): OK`)
+        activeLocationProvider = async () => {
+          try { return parseLocation(await bridge.callEvenApp(method)) } catch { return null }
+        }
+        return loc
+      }
+    } catch { }
+  }
+
   return null
+}
+
+// ─── Android location polling ─────────────────────────────────────────────────
+//
+// Once a working provider is found, poll it every 3 s to keep
+// currentLat/currentLng live and auto-advance route steps.
+
+async function pollLocation() {
+  if (!activeLocationProvider) return
+  const loc = await activeLocationProvider()
+  if (!loc) return
+
+  currentLat = loc.lat
+  currentLng = loc.lng
+
+  if (navState !== 'navigating') {
+    await refreshSpeed()
+    return
+  }
+
+  const newIdx  = advanceStep(loc.lat, loc.lng)
+  const stepped = newIdx !== stepIdx
+  stepIdx = newIdx
+
+  if (stepIdx >= steps.length) {
+    navState = 'idle'
+    steps    = []
+    stopAndroidPoll()
+    await buildPage(null)
+    return
+  }
+
+  if (!stepped) {
+    await refreshBanner()
+    await refreshSpeed()
+    return
+  }
+
+  // Step changed — rebuild with fresh minimap
+  syncPositionFromStep()
+  const mapBytes = await fetchMinimap()
+  await buildPage(mapBytes)
+}
+
+function startAndroidPoll() {
+  stopAndroidPoll()
+  if (!activeLocationProvider) return
+  reportStatus('android poll: started (3 s)')
+  androidPollTimer = setInterval(pollLocation, 3000)
+}
+
+function stopAndroidPoll() {
+  if (androidPollTimer) { clearInterval(androidPollTimer); androidPollTimer = null }
 }
 
 // ─── Step position tracking ───────────────────────────────────────────────────
@@ -339,10 +464,11 @@ function setupInput() {
 export async function menuPauseResume() {
   if (navState === 'paused') {
     navState = 'navigating'
-    startGPS()
+    if (activeLocationProvider) { startAndroidPoll() } else { startGPS() }
   } else {
     navState = 'paused'
     stopGPS()
+    stopAndroidPoll()
   }
   const mapBytes = await fetchMinimap()
   await buildPage(mapBytes)
@@ -369,6 +495,7 @@ export async function menuPassiveMode() {
 export async function menuEndNavigation() {
   stopGPS()
   stopMapRefresh()
+  stopAndroidPoll()
   resetSpeedLimitCache()
   limitMph = null
   steps    = []
@@ -422,6 +549,7 @@ export async function startNavigation() {
         currentLat = bridgeLoc.lat
         currentLng = bridgeLoc.lng
         reportStatus(`bridge GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+        // activeLocationProvider is now set; start live polling after route loads
       } else {
         // Fall back to WebView geolocation (may be denied)
         reportStatus('trying WebView GPS…')
@@ -464,7 +592,12 @@ export async function startNavigation() {
     const mapBytes = await fetchMinimap()
     await buildPage(mapBytes)
 
-    startGPS()
+    // Prefer Android location polling when available; fall back to WebView GPS
+    if (activeLocationProvider) {
+      startAndroidPoll()
+    } else {
+      startGPS()
+    }
     startMapRefresh()
 
   } catch (err) {
