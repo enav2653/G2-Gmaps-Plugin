@@ -145,7 +145,7 @@ export function buildEventContainer(): TextContainerProperty {
     borderWidth:   0,
     borderColor:   0,
     paddingLength: 0,
-    content:       ' ',
+    content:       '',
     isEventCapture: 1,
   })
 }

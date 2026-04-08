@@ -127,7 +127,10 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   }
 
   // Upload map image after page is created (SDK requirement)
-  if (!mapContainer || !mapBytes) return
+  if (!mapContainer || !mapBytes) {
+    reportStatus(`skip upload: container=${!!mapContainer} bytes=${!!mapBytes}`)
+    return
+  }
   const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
     containerID:   CID.MAP,
     containerName: 'minimap',
@@ -230,11 +233,12 @@ function startMapRefresh() {
     if (navState === 'idle') return
     const mapBytes = await fetchMinimap()
     if (!mapBytes) return
-    await bridge.updateImageRawData(new ImageRawDataUpdate({
+    const timerResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,
       containerName: 'minimap',
       imageData:     mapBytes,
     }))
+    reportStatus(`timer upload: ${JSON.stringify(timerResult)}`)
   }, 5000)
 }
 
