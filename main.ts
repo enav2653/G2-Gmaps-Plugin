@@ -46,6 +46,44 @@ let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
 let pageCreated = false
 
+// ─── Bridge location probe ────────────────────────────────────────────────────
+//
+// The Even Hub WebView blocks navigator.geolocation (PERMISSION_DENIED).
+// Probe undocumented callEvenApp methods that the Flutter host might expose.
+
+async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null> {
+  const candidates = ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getPosition', 'location']
+  for (const method of candidates) {
+    try {
+      const r = await bridge.callEvenApp(method)
+      if (r?.lat != null && r?.lng != null)           return { lat: r.lat, lng: r.lng }
+      if (r?.latitude != null && r?.longitude != null) return { lat: r.latitude, lng: r.longitude }
+    } catch { /* method not available */ }
+  }
+  return null
+}
+
+// ─── Step position tracking ───────────────────────────────────────────────────
+//
+// GPS is blocked in Even Hub WebView. Instead, update currentLat/currentLng
+// from the route step coordinates whenever the step changes.
+
+function syncPositionFromStep() {
+  const step = steps[stepIdx]
+  if (!step) return
+  if (step.startLat && step.startLng) {
+    currentLat = step.startLat
+    currentLng = step.startLng
+  }
+}
+
+async function changeStep(newIdx: number) {
+  stepIdx = newIdx
+  syncPositionFromStep()
+  const mapBytes = await fetchMinimap()
+  await buildPage(mapBytes)
+}
+
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
 
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -190,6 +228,7 @@ function startGPS() {
       const newIdx = advanceStep(lat, lng)
       const stepped = newIdx !== stepIdx
       stepIdx = newIdx
+      if (stepped) syncPositionFromStep()
 
       if (stepIdx >= steps.length) {
         navState = 'idle'
@@ -281,16 +320,14 @@ function setupInput() {
       // Swipe up — previous step (manual review)
       case OsEventTypeList.SCROLL_TOP_EVENT: {
         if (!steps.length || stepIdx <= 0) break
-        stepIdx--
-        await refreshBanner()
+        await changeStep(stepIdx - 1)
         break
       }
 
       // Swipe down — skip to next step
       case OsEventTypeList.SCROLL_BOTTOM_EVENT: {
         if (!steps.length || stepIdx >= steps.length - 1) break
-        stepIdx++
-        await refreshBanner()
+        await changeStep(stepIdx + 1)
         break
       }
     }
@@ -378,18 +415,36 @@ export async function startNavigation() {
       currentLng = org.lng
       reportStatus(`origin: ${org.label}`)
     } else {
-      reportStatus('trying GPS…')
-      const pos = await new Promise<GeolocationPosition>((res, rej) => {
-        const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
-        navigator.geolocation.getCurrentPosition(
-          p => { clearTimeout(timer); res(p) },
-          e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
-          { enableHighAccuracy: false },
-        )
-      })
-      currentLat = pos.coords.latitude
-      currentLng = pos.coords.longitude
-      reportStatus(`GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+      // Try undocumented Even Hub bridge location method
+      reportStatus('trying bridge location…')
+      const bridgeLoc = await tryBridgeLocation()
+      if (bridgeLoc) {
+        currentLat = bridgeLoc.lat
+        currentLng = bridgeLoc.lng
+        reportStatus(`bridge GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+      } else {
+        // Fall back to WebView geolocation (may be denied)
+        reportStatus('trying WebView GPS…')
+        try {
+          const pos = await new Promise<GeolocationPosition>((res, rej) => {
+            const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
+            navigator.geolocation.getCurrentPosition(
+              p => { clearTimeout(timer); res(p) },
+              e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
+              { enableHighAccuracy: false },
+            )
+          })
+          currentLat = pos.coords.latitude
+          currentLng = pos.coords.longitude
+          reportStatus(`WebView GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+        } catch (gpsErr) {
+          reportStatus(`GPS failed: ${gpsErr instanceof Error ? gpsErr.message : String(gpsErr)}`)
+          reportStatus('enter a starting address to navigate')
+          navState = 'idle'
+          await buildPage(null)
+          return
+        }
+      }
     }
 
     reportStatus('fetching route…')
@@ -402,6 +457,9 @@ export async function startNavigation() {
       await buildPage(null)
       return
     }
+
+    // Use step 0's start coordinates (more precise than geocoded address)
+    syncPositionFromStep()
 
     const mapBytes = await fetchMinimap()
     await buildPage(mapBytes)

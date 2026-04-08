@@ -9,6 +9,8 @@ export interface RouteStep {
   instruction: string
   distanceMeters: number
   durationSeconds: number
+  startLat: number
+  startLng: number
   endLat: number
   endLng: number
 }
@@ -22,7 +24,7 @@ export async function getRoute(origin: LatLng, destination: LatLng): Promise<Rou
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': MAPS_KEY,
       'X-Goog-FieldMask':
-        'routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.endLocation',
+        'routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.startLocation,routes.legs.steps.endLocation',
     },
     body: JSON.stringify({
       origin:      { location: { latLng: { latitude: origin.lat,      longitude: origin.lng } } },
@@ -47,6 +49,8 @@ function mapStep(step: any): RouteStep {
     instruction:     stripHtml(step.navigationInstruction?.instructions ?? 'Continue'),
     distanceMeters:  step.distanceMeters ?? 0,
     durationSeconds: parseDuration(step.staticDuration),
+    startLat:        step.startLocation?.latLng?.latitude  ?? 0,
+    startLng:        step.startLocation?.latLng?.longitude ?? 0,
     endLat:          step.endLocation?.latLng?.latitude  ?? 0,
     endLng:          step.endLocation?.latLng?.longitude ?? 0,
   }
