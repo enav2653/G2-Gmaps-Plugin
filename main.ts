@@ -14,6 +14,7 @@ import { fetchMapSnapshot, imageToGreyscale4bit } from './mapImage'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
+  buildEventContainer,
   buildBannerContainer,
   buildMinimapContainer,
   buildSpeedContainer,
@@ -93,7 +94,7 @@ async function buildPage(mapBytes: number[] | null = null) {
   const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
   const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
-  const textContainers: TextContainerProperty[] = []
+  const textContainers: TextContainerProperty[] = [buildEventContainer()]
   const imageContainers: ImageContainerProperty[] = []
 
   // Banner visibility:
@@ -232,13 +233,7 @@ function startMapRefresh() {
   mapRefreshTimer = setInterval(async () => {
     if (navState === 'idle') return
     const mapBytes = await fetchMinimap()
-    if (!mapBytes) return
-    const timerResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
-      containerID:   CID.MAP,
-      containerName: 'minimap',
-      imageData:     mapBytes,
-    }))
-    reportStatus(`timer upload: ${JSON.stringify(timerResult)}`)
+    await buildPage(mapBytes)
   }, 5000)
 }
 
