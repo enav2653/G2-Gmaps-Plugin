@@ -1,10 +1,17 @@
 {
   "name": "G2 Maps",
-  "packageName": "com.yourname.g2maps",
+  "package_id": "com.enav2653.g2maps",
   "version": "0.2.0",
+  "edition": "202601",
   "description": "Turn-by-turn Google Maps navigation HUD for G2 glasses",
   "author": "Your Name",
   "icon": "public/icon.png",
-  "entry": "index.html",
-  "permissions": ["location", "network"]
+  "entrypoint": "index.html",
+  "min_app_version": "1.0.0",
+  "min_sdk_version": "1.0.0",
+  "permissions": [
+    { "name": "location", "desc": "Used to track your position for turn-by-turn navigation" },
+    { "name": "network",  "desc": "Used to fetch routes, map images, and speed limit data from Google APIs" }
+  ],
+  "supported_languages": ["en"]
 }
