@@ -32,7 +32,7 @@ import { formatInstruction, formatDistance, formatETA } from './display'
 export const CANVAS_W = 576
 export const CANVAS_H = 288
 
-const BANNER_H  = 44
+const BANNER_H  = 64
 const BOTTOM_Y  = 196
 const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 
@@ -84,7 +84,7 @@ export function buildBannerText(
   if (state === 'paused')  return 'Navigation paused  •  Tap to resume'
 
   const step = steps[stepIdx]
-  if (!step) return ''
+  if (!step) return 'Finding location…'
 
   const instr = formatInstruction(step.instruction)
   const dist  = formatDistance(step.distanceMeters)
@@ -184,7 +184,6 @@ export function buildMinimapContainer(settings: HudSettings): ImageContainerProp
     yPosition:     y,
     width:         w,
     height:        h,
-    isEventCapture: 0,
   })
 }
 

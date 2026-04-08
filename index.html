@@ -149,6 +149,9 @@
 </head>
 <body>
 
+<!-- ── Debug log (always visible) ── -->
+<div id="debug-log" style="position:fixed;bottom:0;left:0;right:0;max-height:90px;overflow-y:auto;background:#0a0a12;border-top:1px solid #333;font-size:10px;font-family:monospace;color:#4ade80;padding:4px 8px;z-index:999"></div>
+
 <!-- ── Tab bar ── -->
 <div class="tabs">
   <div class="tab active" data-tab="nav">Navigate</div>
@@ -161,6 +164,14 @@
      ══════════════════════════════════════════ -->
 <div class="panel active" id="panel-nav">
   <div class="nav-search">
+    <div class="search-label">Starting from</div>
+    <input class="search-input" id="origin-input" type="text"
+           placeholder="Current location (or type an address)"
+           autocomplete="off" autocorrect="off" spellcheck="false"/>
+  </div>
+  <div class="suggestions" id="origin-suggestions"></div>
+  <div class="selected-dest" id="selected-origin" style="display:none"></div>
+  <div class="nav-search" style="margin-top:8px">
     <div class="search-label">Destination</div>
     <input class="search-input" id="dest-input" type="text"
            placeholder="Search address or place…"
@@ -328,11 +339,22 @@
 </div>
 
 <script type="module">
-  import { geocode }           from './src/maps.ts'
-  import { startNavigation, menuPauseResume, menuPassiveMode, menuEndNavigation, reloadSettings } from './src/main.ts'
-  import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './src/settings.ts'
+  import { geocode }           from './maps.ts'
+  import { startNavigation, menuPauseResume, menuPassiveMode, menuEndNavigation, reloadSettings } from './main.ts'
+  import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './settings.ts'
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
+
+  // ── Diagnostics ───────────────────────────────────────────────────────────
+  const debugLog = document.getElementById('debug-log')
+  function appendDebug(msg) {
+    const line = document.createElement('div')
+    line.textContent = new Date().toISOString().slice(11,19) + ' ' + msg
+    debugLog.appendChild(line)
+    debugLog.scrollTop = debugLog.scrollHeight
+  }
+  window.addEventListener('g2maps:status', e => appendDebug(e.detail))
+  window.addEventListener('unhandledrejection', e => appendDebug('ERROR: ' + e.reason))
 
   // ── Tab switching ──────────────────────────────────────────────────────────
   document.querySelectorAll('.tab').forEach(tab => {
@@ -351,20 +373,38 @@
   })
 
   // ── Nav tab ────────────────────────────────────────────────────────────────
-  const destInput   = document.getElementById('dest-input')
-  const suggestions = document.getElementById('suggestions')
-  const selectedEl  = document.getElementById('selected-dest')
-  const goBtn       = document.getElementById('go-btn')
-  const statusEl    = document.getElementById('status')
+  const originInput    = document.getElementById('origin-input')
+  const originSuggEl  = document.getElementById('origin-suggestions')
+  const selectedOriEl  = document.getElementById('selected-origin')
+  const destInput      = document.getElementById('dest-input')
+  const suggestions    = document.getElementById('suggestions')
+  const selectedEl     = document.getElementById('selected-dest')
+  const goBtn          = document.getElementById('go-btn')
+  const statusEl       = document.getElementById('status')
 
   let selectedLocation = null
+  let selectedOrigin   = null
   let debounce = null
-  let autocomplete = null
+  let originDebounce = null
 
   const script = document.createElement('script')
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`
-  script.onload = () => { autocomplete = new google.maps.places.AutocompleteService() }
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&loading=async&v=weekly`
+  script.async = true
   document.head.appendChild(script)
+
+  originInput.addEventListener('input', () => {
+    clearTimeout(originDebounce)
+    selectedOrigin = null
+    sessionStorage.removeItem('g2maps_origin')
+    const q = originInput.value.trim()
+    if (q.length < 3) { originSuggEl.innerHTML = ''; originSuggEl.classList.remove('open'); return }
+    originDebounce = setTimeout(() => fetchSuggestions(q, originSuggEl, (placeId, name) =>
+      selectPlace(placeId, name, originInput, originSuggEl, selectedOriEl, loc => {
+        selectedOrigin = loc
+        sessionStorage.setItem('g2maps_origin', JSON.stringify(loc))
+      })
+    ), 300)
+  })
 
   destInput.addEventListener('input', () => {
     clearTimeout(debounce)
@@ -373,38 +413,44 @@
     selectedEl.classList.remove('open')
     const q = destInput.value.trim()
     if (q.length < 3) { suggestions.innerHTML = ''; suggestions.classList.remove('open'); return }
-    debounce = setTimeout(() => fetchSuggestions(q), 300)
+    debounce = setTimeout(() => fetchSuggestions(q, suggestions, (placeId, name) =>
+      selectPlace(placeId, name, destInput, suggestions, selectedEl, loc => {
+        selectedLocation = loc
+        goBtn.disabled = false
+      })
+    ), 300)
   })
 
-  function fetchSuggestions(q) {
-    if (!autocomplete) return
-    autocomplete.getPlacePredictions({ input: q, types: ['geocode','establishment'] }, (preds, status) => {
-      if (status !== google.maps.places.PlacesServiceStatus.OK || !preds) {
-        suggestions.classList.remove('open'); return
-      }
-      suggestions.innerHTML = preds.slice(0,5).map(p => `
-        <div class="suggestion" data-place-id="${p.place_id}">
-          <div class="sug-name">${p.structured_formatting.main_text}</div>
-          <div class="sug-addr">${p.structured_formatting.secondary_text ?? ''}</div>
-        </div>`).join('')
-      suggestions.classList.add('open')
-      suggestions.querySelectorAll('.suggestion').forEach(el => {
-        el.addEventListener('click', () => selectPlace(el.dataset.placeId, el.querySelector('.sug-name').textContent))
-      })
+  async function fetchSuggestions(q, suggEl, onSelect) {
+    const { AutocompleteSuggestion } = await google.maps.importLibrary('places')
+    const { suggestions: preds } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: q })
+    if (!preds?.length) { suggEl.classList.remove('open'); return }
+    suggEl.innerHTML = preds.slice(0, 5).map(p => {
+      const pred = p.placePrediction
+      return `
+        <div class="suggestion" data-place-id="${pred.placeId}">
+          <div class="sug-name">${pred.mainText.text}</div>
+          <div class="sug-addr">${pred.secondaryText?.text ?? ''}</div>
+        </div>`
+    }).join('')
+    suggEl.classList.add('open')
+    suggEl.querySelectorAll('.suggestion').forEach(el => {
+      el.addEventListener('click', () => onSelect(el.dataset.placeId, el.querySelector('.sug-name').textContent))
     })
   }
 
-  function selectPlace(placeId, name) {
-    new google.maps.Geocoder().geocode({ placeId }, (results, status) => {
-      if (status !== 'OK' || !results[0]) return
-      const loc = results[0].geometry.location
-      selectedLocation = { lat: loc.lat(), lng: loc.lng(), label: results[0].formatted_address }
-      destInput.value = name
-      suggestions.innerHTML = ''; suggestions.classList.remove('open')
-      selectedEl.textContent = selectedLocation.label
-      selectedEl.classList.add('open')
-      goBtn.disabled = false
-    })
+  async function selectPlace(placeId, name, inputEl, suggEl, selectedEl, onLocation) {
+    const { Place } = await google.maps.importLibrary('places')
+    const place = new Place({ id: placeId })
+    await place.fetchFields({ fields: ['location', 'formattedAddress'] })
+    const loc = { lat: place.location.lat(), lng: place.location.lng(), label: place.formattedAddress }
+    inputEl.value = name
+    suggEl.innerHTML = ''
+    suggEl.classList.remove('open')
+    selectedEl.textContent = loc.label
+    selectedEl.style.display = 'block'
+    selectedEl.classList.add('open')
+    onLocation(loc)
   }
 
   goBtn.addEventListener('click', async () => {

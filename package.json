@@ -1,11 +1,11 @@
 {
   "name": "g2-maps",
-  "version": "0.2.0",
+  "version": "0.2.7",
   "description": "Google Maps HUD navigation for Even Realities G2 glasses",
   "type": "module",
   "scripts": {
     "dev":      "vite",
-    "build":    "tsc && vite build",
+    "build":    "node ./node_modules/typescript/bin/tsc && node ./node_modules/vite/bin/vite.js build",
     "simulate": "evenhub-simulator http://localhost:5173",
     "pack":     "evenhub pack app.json dist -o g2-maps.ehpk"
   },

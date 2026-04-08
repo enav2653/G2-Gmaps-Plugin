@@ -25,12 +25,23 @@ export async function fetchMapSnapshot(lat: number, lng: number, opts: MapImageO
 /**
  * Convert a PNG/JPEG blob to 4-bit greyscale packed bytes (2 pixels per byte,
  * high nibble first) as expected by bridge.updateImageRawData().
+ *
+ * Uses HTMLCanvasElement instead of OffscreenCanvas for WebView compatibility.
  */
 export async function imageToGreyscaleBytes(blob: Blob, w: number, h: number): Promise<Uint8Array> {
-  const bitmap = await createImageBitmap(blob)
-  const canvas = new OffscreenCanvas(w, h)
-  const ctx    = canvas.getContext('2d')!
-  ctx.drawImage(bitmap, 0, 0, w, h)
+  const url = URL.createObjectURL(blob)
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image) }
+    image.onerror = (e) => { URL.revokeObjectURL(url); reject(e) }
+    image.src = url
+  })
+
+  const canvas = document.createElement('canvas')
+  canvas.width  = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(img, 0, 0, w, h)
 
   const { data } = ctx.getImageData(0, 0, w, h)
   const out = new Uint8Array(Math.ceil((w * h) / 2))

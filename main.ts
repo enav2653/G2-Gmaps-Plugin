@@ -1,7 +1,12 @@
 import {
   waitForEvenAppBridge,
   OsEventTypeList,
-  ImuReportPace,
+  CreateStartUpPageContainer,
+  RebuildPageContainer,
+  ImageRawDataUpdate,
+  TextContainerUpgrade,
+  TextContainerProperty,
+  ImageContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
@@ -37,10 +42,9 @@ let currentLat = 0
 let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
-let headingDeg = 0            // from IMU, degrees clockwise from north
-
 let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
+let pageCreated = false
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
 
@@ -66,13 +70,16 @@ async function fetchMinimap(): Promise<Uint8Array | null> {
   if (!settings.minimap.visible) return null
   try {
     const { w, h } = minimapDims(settings)
+    reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
     const blob  = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
+    reportStatus(`minimap blob: ${blob.size} bytes`)
     let   bytes = await imageToGreyscaleBytes(blob, w, h)
+    reportStatus(`minimap bytes: ${bytes.length}`)
     const br    = settings.minimap.brightness / 100
     if (br < 1) bytes = applyBrightness(bytes, br)
     return bytes
   } catch (e) {
-    console.warn('Minimap fetch failed', e)
+    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
 }
@@ -86,7 +93,8 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
   const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
-  const containers = [buildEventContainer()]
+  const textContainers: TextContainerProperty[] = [buildEventContainer()]
+  const imageContainers: ImageContainerProperty[] = []
 
   // Banner visibility:
   //   always-on  → always show (except passive/idle handled via content)
@@ -94,21 +102,38 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   //                not possible — we instead show a short version
   //   always-off → omit container entirely
   if (bannerMode !== 'always-off') {
-    containers.push(buildBannerContainer(bannerContent))
+    textContainers.push(buildBannerContainer(bannerContent))
   }
 
   const mapContainer = buildMinimapContainer(settings)
-  if (mapContainer) containers.push(mapContainer)
+  if (mapContainer) imageContainers.push(mapContainer)
 
   const speedContainer = buildSpeedContainer(speedContent, settings)
-  if (speedContainer) containers.push(speedContainer)
+  if (speedContainer) textContainers.push(speedContainer)
 
-  await bridge.createStartUpPageContainer(containers)
+  const containerData = {
+    containerTotalNum: textContainers.length + imageContainers.length,
+    textObject:        textContainers,
+    imageObject:       imageContainers.length ? imageContainers : undefined,
+  }
+
+  if (!pageCreated) {
+    const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+    pageCreated = true
+    reportStatus(`create: ${JSON.stringify(result)}`)
+  } else {
+    const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+    reportStatus(`rebuild: ${ok}`)
+  }
 
   // Upload map image after page is created (SDK requirement)
-  if (mapContainer && mapBytes) {
-    await bridge.updateImageRawData(CID.MAP, 'minimap', mapBytes)
-  }
+  if (!mapContainer || !mapBytes) return
+  const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
+    containerID:   CID.MAP,
+    containerName: 'minimap',
+    imageData:     mapBytes,
+  }))
+  reportStatus(`minimap upload: ${JSON.stringify(imgResult)}`)
 }
 
 // ─── In-place banner update (fast, no flicker) ────────────────────────────────
@@ -116,13 +141,25 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
 async function refreshBanner() {
   if (bannerMode === 'always-off') return
   const content = buildBannerText(steps, stepIdx, navState, bannerMode)
-  await bridge.textContainerUpgrade(CID.BANNER, 'banner', content, 0, content.length)
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.BANNER,
+    containerName: 'banner',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
 }
 
 async function refreshSpeed() {
   if (!settings.speed.visible) return
   const content = buildSpeedText(speedMph, limitMph, settings)
-  await bridge.textContainerUpgrade(CID.SPEED, 'speed', content, 0, content.length)
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.SPEED,
+    containerName: 'speed',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
 }
 
 // ─── GPS watch ────────────────────────────────────────────────────────────────
@@ -192,9 +229,12 @@ function startMapRefresh() {
   mapRefreshTimer = setInterval(async () => {
     if (navState === 'idle') return
     const mapBytes = await fetchMinimap()
-    if (mapBytes) {
-      await bridge.updateImageRawData(CID.MAP, 'minimap', mapBytes)
-    }
+    if (!mapBytes) return
+    await bridge.updateImageRawData(new ImageRawDataUpdate({
+      containerID:   CID.MAP,
+      containerName: 'minimap',
+      imageData:     mapBytes,
+    }))
   }, 5000)
 }
 
@@ -203,17 +243,8 @@ function stopMapRefresh() {
 }
 
 // ─── IMU — heading tracking ───────────────────────────────────────────────────
-
-async function startIMU() {
-  await bridge.imuControl(true, ImuReportPace.P500)
-  bridge.onEvenHubEvent(event => {
-    const sys = event.sysEvent
-    if (!sys?.imuData) return
-    if (sys.eventType !== OsEventTypeList.IMU_DATA_REPORT) return
-    // y-axis rotation approximates compass heading on G2
-    headingDeg = ((sys.imuData.y * 180 / Math.PI) + 360) % 360
-  })
-}
+// Disabled: headingDeg is not currently used in any display output.
+// Re-enable when minimap heading rotation is implemented.
 
 // ─── Touchpad input ───────────────────────────────────────────────────────────
 
@@ -308,6 +339,7 @@ export async function menuEndNavigation() {
   stepIdx  = 0
   navState = 'idle'
   sessionStorage.removeItem('g2maps_destination')
+  sessionStorage.removeItem('g2maps_origin')
   await buildPage(null)
 }
 
@@ -335,20 +367,36 @@ export async function startNavigation() {
   }
 
   navState = 'navigating'
-  await buildPage(null)   // show "calculating" state immediately
+  await buildPage(null)
 
-  const dest = JSON.parse(raw) as { lat: number; lng: number; label: string }
+  const dest   = JSON.parse(raw) as { lat: number; lng: number; label: string }
+  const rawOrg = sessionStorage.getItem('g2maps_origin')
 
   try {
-    const pos = await new Promise<GeolocationPosition>((res, rej) =>
-      navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true }),
-    )
+    if (rawOrg) {
+      const org  = JSON.parse(rawOrg) as { lat: number; lng: number; label: string }
+      currentLat = org.lat
+      currentLng = org.lng
+      reportStatus(`origin: ${org.label}`)
+    } else {
+      reportStatus('trying GPS…')
+      const pos = await new Promise<GeolocationPosition>((res, rej) => {
+        const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
+        navigator.geolocation.getCurrentPosition(
+          p => { clearTimeout(timer); res(p) },
+          e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
+          { enableHighAccuracy: false },
+        )
+      })
+      currentLat = pos.coords.latitude
+      currentLng = pos.coords.longitude
+      reportStatus(`GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+    }
 
-    currentLat = pos.coords.latitude
-    currentLng = pos.coords.longitude
-
+    reportStatus('fetching route…')
     steps   = await getRoute({ lat: currentLat, lng: currentLng }, { lat: dest.lat, lng: dest.lng })
     stepIdx = 0
+    reportStatus(`route: ${steps.length} steps`)
 
     if (!steps.length) {
       navState = 'idle'
@@ -363,10 +411,19 @@ export async function startNavigation() {
     startMapRefresh()
 
   } catch (err) {
-    console.error('Navigation start failed', err)
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus(`nav error: ${msg}`)
     navState = 'idle'
     await buildPage(null)
+    throw err
   }
+}
+
+// ─── Diagnostics ─────────────────────────────────────────────────────────────
+
+function reportStatus(msg: string) {
+  console.warn('[G2Maps]', msg)
+  window.dispatchEvent(new CustomEvent('g2maps:status', { detail: msg }))
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -375,7 +432,6 @@ async function init() {
   bridge = await waitForEvenAppBridge()
 
   setupInput()
-  await startIMU()
 
   bridge.onEvenHubEvent(event => {
     const sys = event.sysEvent
