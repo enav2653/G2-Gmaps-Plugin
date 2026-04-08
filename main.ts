@@ -398,7 +398,10 @@ export async function startNavigation() {
     startMapRefresh()
 
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const geo = err as GeolocationPositionError
+    const msg = geo?.code !== undefined
+      ? `geo error code ${geo.code}: ${geo.message}`
+      : (err instanceof Error ? err.message : String(err))
     reportStatus(`nav error: ${msg}`)
     navState = 'idle'
     await buildPage(null)
