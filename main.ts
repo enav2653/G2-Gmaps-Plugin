@@ -2,6 +2,11 @@ import {
   waitForEvenAppBridge,
   OsEventTypeList,
   ImuReportPace,
+  CreateStartUpPageContainer,
+  ImageRawDataUpdate,
+  TextContainerUpgrade,
+  TextContainerProperty,
+  ImageContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
@@ -86,7 +91,8 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
   const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
-  const containers = [buildEventContainer()]
+  const textContainers: TextContainerProperty[] = [buildEventContainer()]
+  const imageContainers: ImageContainerProperty[] = []
 
   // Banner visibility:
   //   always-on  → always show (except passive/idle handled via content)
@@ -94,21 +100,28 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   //                not possible — we instead show a short version
   //   always-off → omit container entirely
   if (bannerMode !== 'always-off') {
-    containers.push(buildBannerContainer(bannerContent))
+    textContainers.push(buildBannerContainer(bannerContent))
   }
 
   const mapContainer = buildMinimapContainer(settings)
-  if (mapContainer) containers.push(mapContainer)
+  if (mapContainer) imageContainers.push(mapContainer)
 
   const speedContainer = buildSpeedContainer(speedContent, settings)
-  if (speedContainer) containers.push(speedContainer)
+  if (speedContainer) textContainers.push(speedContainer)
 
-  await bridge.createStartUpPageContainer(containers)
+  await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
+    containerTotalNum: textContainers.length + imageContainers.length,
+    textObject:        textContainers,
+    imageObject:       imageContainers.length ? imageContainers : undefined,
+  }))
 
   // Upload map image after page is created (SDK requirement)
-  if (mapContainer && mapBytes) {
-    await bridge.updateImageRawData(CID.MAP, 'minimap', mapBytes)
-  }
+  if (!mapContainer || !mapBytes) return
+  await bridge.updateImageRawData(new ImageRawDataUpdate({
+    containerID:   CID.MAP,
+    containerName: 'minimap',
+    imageData:     mapBytes,
+  }))
 }
 
 // ─── In-place banner update (fast, no flicker) ────────────────────────────────
@@ -116,13 +129,25 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
 async function refreshBanner() {
   if (bannerMode === 'always-off') return
   const content = buildBannerText(steps, stepIdx, navState, bannerMode)
-  await bridge.textContainerUpgrade(CID.BANNER, 'banner', content, 0, content.length)
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.BANNER,
+    containerName: 'banner',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
 }
 
 async function refreshSpeed() {
   if (!settings.speed.visible) return
   const content = buildSpeedText(speedMph, limitMph, settings)
-  await bridge.textContainerUpgrade(CID.SPEED, 'speed', content, 0, content.length)
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.SPEED,
+    containerName: 'speed',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
 }
 
 // ─── GPS watch ────────────────────────────────────────────────────────────────
@@ -192,9 +217,12 @@ function startMapRefresh() {
   mapRefreshTimer = setInterval(async () => {
     if (navState === 'idle') return
     const mapBytes = await fetchMinimap()
-    if (mapBytes) {
-      await bridge.updateImageRawData(CID.MAP, 'minimap', mapBytes)
-    }
+    if (!mapBytes) return
+    await bridge.updateImageRawData(new ImageRawDataUpdate({
+      containerID:   CID.MAP,
+      containerName: 'minimap',
+      imageData:     mapBytes,
+    }))
   }, 5000)
 }
 
@@ -210,6 +238,7 @@ async function startIMU() {
     const sys = event.sysEvent
     if (!sys?.imuData) return
     if (sys.eventType !== OsEventTypeList.IMU_DATA_REPORT) return
+    if (sys.imuData.y === undefined) return
     // y-axis rotation approximates compass heading on G2
     headingDeg = ((sys.imuData.y * 180 / Math.PI) + 360) % 360
   })
