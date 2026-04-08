@@ -2,6 +2,7 @@ import {
   waitForEvenAppBridge,
   OsEventTypeList,
   CreateStartUpPageContainer,
+  RebuildPageContainer,
   ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
@@ -43,6 +44,7 @@ let speedMph   = 0
 let limitMph:  number | null = null
 let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
+let pageCreated = false
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
 
@@ -112,8 +114,14 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
     imageObject:       imageContainers.length ? imageContainers : undefined,
   }
 
-  const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
-  reportStatus(`buildPage result: ${JSON.stringify(result)}`)
+  if (!pageCreated) {
+    const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+    pageCreated = true
+    reportStatus(`create: ${JSON.stringify(result)}`)
+  } else {
+    const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+    reportStatus(`rebuild: ${ok}`)
+  }
 
   // Upload map image after page is created (SDK requirement)
   if (!mapContainer || !mapBytes) return
