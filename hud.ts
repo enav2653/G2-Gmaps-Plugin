@@ -229,9 +229,7 @@ export function buildSpeedContainer(
 export function applyBrightness(bytes: Uint8Array, brightness: number): Uint8Array {
   const out = new Uint8Array(bytes.length)
   for (let i = 0; i < bytes.length; i++) {
-    const hi = (bytes[i] >> 4) & 0x0f
-    const lo =  bytes[i]       & 0x0f
-    out[i] = (Math.round(hi * brightness) << 4) | Math.round(lo * brightness)
+    out[i] = Math.round(bytes[i] * brightness)
   }
   return out
 }

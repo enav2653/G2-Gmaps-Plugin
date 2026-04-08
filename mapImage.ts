@@ -44,14 +44,11 @@ export async function imageToGreyscaleBytes(blob: Blob, w: number, h: number): P
   ctx.drawImage(img, 0, 0, w, h)
 
   const { data } = ctx.getImageData(0, 0, w, h)
-  const out = new Uint8Array(Math.ceil((w * h) / 2))
+  // 8-bit greyscale: 1 byte per pixel, values 0–255
+  const out = new Uint8Array(w * h)
 
   for (let i = 0; i < w * h; i++) {
-    const luma   = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
-    const nibble = Math.min(15, Math.round((luma / 255) * 15))
-    const bi     = Math.floor(i / 2)
-    if (i % 2 === 0) { out[bi] = nibble << 4; continue }
-    out[bi] |= nibble & 0x0f
+    out[i] = Math.round(0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2])
   }
 
   return out

@@ -74,7 +74,7 @@ async function fetchMinimap(): Promise<Uint8Array | null> {
     const blob  = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
     reportStatus(`minimap blob: ${blob.size} bytes`)
     let   bytes = await imageToGreyscaleBytes(blob, w, h)
-    reportStatus(`minimap bytes: ${bytes.length}`)
+    reportStatus(`minimap bytes: ${bytes.length} (${w}x${h}=${w*h})`)
     const br    = settings.minimap.brightness / 100
     if (br < 1) bytes = applyBrightness(bytes, br)
     return bytes
