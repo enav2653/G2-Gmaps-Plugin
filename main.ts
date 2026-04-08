@@ -362,20 +362,28 @@ export async function startNavigation() {
   }
 
   navState = 'navigating'
-  await buildPage(null)   // show "calculating" state immediately
+  await buildPage(null)
 
   const dest = JSON.parse(raw) as { lat: number; lng: number; label: string }
 
   try {
+    reportStatus(`geo available: ${!!navigator.geolocation}`)
+
     const pos = await new Promise<GeolocationPosition>((res, rej) =>
-      navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true }),
+      navigator.geolocation.getCurrentPosition(res, rej, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+      }),
     )
 
+    reportStatus(`GPS: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`)
     currentLat = pos.coords.latitude
     currentLng = pos.coords.longitude
 
+    reportStatus('fetching route…')
     steps   = await getRoute({ lat: currentLat, lng: currentLng }, { lat: dest.lat, lng: dest.lng })
     stepIdx = 0
+    reportStatus(`route: ${steps.length} steps`)
 
     if (!steps.length) {
       navState = 'idle'
@@ -390,9 +398,11 @@ export async function startNavigation() {
     startMapRefresh()
 
   } catch (err) {
-    console.error('Navigation start failed', err)
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus(`nav error: ${msg}`)
     navState = 'idle'
     await buildPage(null)
+    throw err
   }
 }
 

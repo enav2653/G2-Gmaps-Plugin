@@ -84,7 +84,7 @@ export function buildBannerText(
   if (state === 'paused')  return 'Navigation paused  •  Tap to resume'
 
   const step = steps[stepIdx]
-  if (!step) return ''
+  if (!step) return 'Finding location…'
 
   const instr = formatInstruction(step.instruction)
   const dist  = formatDistance(step.distanceMeters)
