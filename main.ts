@@ -70,13 +70,16 @@ async function fetchMinimap(): Promise<Uint8Array | null> {
   if (!settings.minimap.visible) return null
   try {
     const { w, h } = minimapDims(settings)
+    reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
     const blob  = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
+    reportStatus(`minimap blob: ${blob.size} bytes`)
     let   bytes = await imageToGreyscaleBytes(blob, w, h)
+    reportStatus(`minimap bytes: ${bytes.length}`)
     const br    = settings.minimap.brightness / 100
     if (br < 1) bytes = applyBrightness(bytes, br)
     return bytes
   } catch (e) {
-    console.warn('Minimap fetch failed', e)
+    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
 }
@@ -125,11 +128,12 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
 
   // Upload map image after page is created (SDK requirement)
   if (!mapContainer || !mapBytes) return
-  await bridge.updateImageRawData(new ImageRawDataUpdate({
+  const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
     containerID:   CID.MAP,
     containerName: 'minimap',
     imageData:     mapBytes,
   }))
+  reportStatus(`minimap upload: ${JSON.stringify(imgResult)}`)
 }
 
 // ─── In-place banner update (fast, no flicker) ────────────────────────────────
