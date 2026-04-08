@@ -359,11 +359,10 @@
 
   let selectedLocation = null
   let debounce = null
-  let autocomplete = null
 
   const script = document.createElement('script')
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`
-  script.onload = () => { autocomplete = new google.maps.places.AutocompleteService() }
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&loading=async&v=weekly`
+  script.async = true
   document.head.appendChild(script)
 
   destInput.addEventListener('input', () => {
@@ -376,35 +375,35 @@
     debounce = setTimeout(() => fetchSuggestions(q), 300)
   })
 
-  function fetchSuggestions(q) {
-    if (!autocomplete) return
-    autocomplete.getPlacePredictions({ input: q, types: ['geocode','establishment'] }, (preds, status) => {
-      if (status !== google.maps.places.PlacesServiceStatus.OK || !preds) {
-        suggestions.classList.remove('open'); return
-      }
-      suggestions.innerHTML = preds.slice(0,5).map(p => `
-        <div class="suggestion" data-place-id="${p.place_id}">
-          <div class="sug-name">${p.structured_formatting.main_text}</div>
-          <div class="sug-addr">${p.structured_formatting.secondary_text ?? ''}</div>
-        </div>`).join('')
-      suggestions.classList.add('open')
-      suggestions.querySelectorAll('.suggestion').forEach(el => {
-        el.addEventListener('click', () => selectPlace(el.dataset.placeId, el.querySelector('.sug-name').textContent))
-      })
+  async function fetchSuggestions(q) {
+    const { AutocompleteSuggestion } = await google.maps.importLibrary('places')
+    const { suggestions: preds } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: q })
+    if (!preds?.length) { suggestions.classList.remove('open'); return }
+    suggestions.innerHTML = preds.slice(0, 5).map(p => {
+      const pred = p.placePrediction
+      return `
+        <div class="suggestion" data-place-id="${pred.placeId}">
+          <div class="sug-name">${pred.mainText.text}</div>
+          <div class="sug-addr">${pred.secondaryText?.text ?? ''}</div>
+        </div>`
+    }).join('')
+    suggestions.classList.add('open')
+    suggestions.querySelectorAll('.suggestion').forEach(el => {
+      el.addEventListener('click', () => selectPlace(el.dataset.placeId, el.querySelector('.sug-name').textContent))
     })
   }
 
-  function selectPlace(placeId, name) {
-    new google.maps.Geocoder().geocode({ placeId }, (results, status) => {
-      if (status !== 'OK' || !results[0]) return
-      const loc = results[0].geometry.location
-      selectedLocation = { lat: loc.lat(), lng: loc.lng(), label: results[0].formatted_address }
-      destInput.value = name
-      suggestions.innerHTML = ''; suggestions.classList.remove('open')
-      selectedEl.textContent = selectedLocation.label
-      selectedEl.classList.add('open')
-      goBtn.disabled = false
-    })
+  async function selectPlace(placeId, name) {
+    const { Place } = await google.maps.importLibrary('places')
+    const place = new Place({ id: placeId })
+    await place.fetchFields({ fields: ['location', 'formattedAddress'] })
+    selectedLocation = { lat: place.location.lat(), lng: place.location.lng(), label: place.formattedAddress }
+    destInput.value = name
+    suggestions.innerHTML = ''
+    suggestions.classList.remove('open')
+    selectedEl.textContent = selectedLocation.label
+    selectedEl.classList.add('open')
+    goBtn.disabled = false
   }
 
   goBtn.addEventListener('click', async () => {
