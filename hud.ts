@@ -124,10 +124,10 @@ export function minimapDims(settings: HudSettings): { w: number; h: number } {
   const scale = settings.minimap.size / 100
   const w = Math.round(MAP_BASE_W * scale)
   const h = Math.round(MAP_BASE_H * scale)
-  // Clamp to SDK image container limits (20–200 w, 20–100 h)
+  // Clamp to SDK image container limits (20–288 w, 20–144 h)
   return {
-    w: Math.max(20, Math.min(200, w)),
-    h: Math.max(20, Math.min(100, h)),
+    w: Math.max(20, Math.min(288, w)),
+    h: Math.max(20, Math.min(144, h)),
   }
 }
 

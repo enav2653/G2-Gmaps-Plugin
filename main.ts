@@ -10,7 +10,7 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { fetchMapSnapshot, imageToGreyscaleBytes } from './mapImage'
+import { fetchMapSnapshot } from './mapImage'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
@@ -20,7 +20,7 @@ import {
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
-  applyBrightness,
+
   minimapDims,
   BANNER_MODES, BannerMode,
   NavState,
@@ -72,11 +72,10 @@ async function fetchMinimap(): Promise<Uint8Array | null> {
     const { w, h } = minimapDims(settings)
     reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
     const blob  = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
-    reportStatus(`minimap blob: ${blob.size} bytes`)
-    let   bytes = await imageToGreyscaleBytes(blob, w, h)
-    reportStatus(`minimap bytes: ${bytes.length} (${w}x${h}=${w*h})`)
-    const br    = settings.minimap.brightness / 100
-    if (br < 1) bytes = applyBrightness(bytes, br)
+    reportStatus(`minimap blob: ${blob.size} bytes (${blob.type})`)
+    // Pass PNG bytes directly — SDK decodes and converts to 4-bit greyscale internally
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    reportStatus(`minimap bytes: ${bytes.length}`)
     return bytes
   } catch (e) {
     reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
@@ -93,7 +92,7 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
   const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
-  const textContainers: TextContainerProperty[] = [buildEventContainer()]
+  const textContainers: TextContainerProperty[] = []
   const imageContainers: ImageContainerProperty[] = []
 
   // Banner visibility:
