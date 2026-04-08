@@ -334,6 +334,10 @@
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
 
+  // ── Diagnostics ───────────────────────────────────────────────────────────
+  window.addEventListener('g2maps:status', e => setStatus('[debug] ' + e.detail, 'warn'))
+  window.addEventListener('unhandledrejection', e => setStatus('Unhandled error: ' + e.reason, 'error'))
+
   // ── Tab switching ──────────────────────────────────────────────────────────
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {

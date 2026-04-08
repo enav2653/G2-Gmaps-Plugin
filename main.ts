@@ -118,10 +118,12 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
   }
 
   if (!pageCreated) {
-    await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+    const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+    reportStatus(`createStartUp result: ${JSON.stringify(result)}`)
     pageCreated = true
   } else {
-    await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+    const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+    if (!ok) reportStatus(`rebuildPage returned false (containers: ${containerData.containerTotalNum})`)
   }
 
   // Upload map image after page is created (SDK requirement)
@@ -405,6 +407,13 @@ export async function startNavigation() {
     navState = 'idle'
     await buildPage(null)
   }
+}
+
+// ─── Diagnostics ─────────────────────────────────────────────────────────────
+
+function reportStatus(msg: string) {
+  console.warn('[G2Maps]', msg)
+  window.dispatchEvent(new CustomEvent('g2maps:status', { detail: msg }))
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
