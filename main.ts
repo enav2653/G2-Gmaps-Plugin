@@ -1,9 +1,7 @@
 import {
   waitForEvenAppBridge,
   OsEventTypeList,
-  ImuReportPace,
   CreateStartUpPageContainer,
-  RebuildPageContainer,
   ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
@@ -43,11 +41,8 @@ let currentLat = 0
 let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
-let headingDeg = 0            // from IMU, degrees clockwise from north
-
 let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
-let pageCreated = false
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
 
@@ -117,14 +112,8 @@ async function buildPage(mapBytes: Uint8Array | null = null) {
     imageObject:       imageContainers.length ? imageContainers : undefined,
   }
 
-  if (!pageCreated) {
-    const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
-    reportStatus(`createStartUp result: ${JSON.stringify(result)}`)
-    pageCreated = true
-  } else {
-    const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
-    if (!ok) reportStatus(`rebuildPage returned false (containers: ${containerData.containerTotalNum})`)
-  }
+  const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+  reportStatus(`buildPage result: ${JSON.stringify(result)}`)
 
   // Upload map image after page is created (SDK requirement)
   if (!mapContainer || !mapBytes) return
@@ -242,18 +231,8 @@ function stopMapRefresh() {
 }
 
 // ─── IMU — heading tracking ───────────────────────────────────────────────────
-
-async function startIMU() {
-  await bridge.imuControl(true, ImuReportPace.P500)
-  bridge.onEvenHubEvent(event => {
-    const sys = event.sysEvent
-    if (!sys?.imuData) return
-    if (sys.eventType !== OsEventTypeList.IMU_DATA_REPORT) return
-    if (sys.imuData.y === undefined) return
-    // y-axis rotation approximates compass heading on G2
-    headingDeg = ((sys.imuData.y * 180 / Math.PI) + 360) % 360
-  })
-}
+// Disabled: headingDeg is not currently used in any display output.
+// Re-enable when minimap heading rotation is implemented.
 
 // ─── Touchpad input ───────────────────────────────────────────────────────────
 
@@ -422,7 +401,6 @@ async function init() {
   bridge = await waitForEvenAppBridge()
 
   setupInput()
-  await startIMU()
 
   bridge.onEvenHubEvent(event => {
     const sys = event.sysEvent
