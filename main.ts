@@ -393,7 +393,7 @@ async function reroute() {
 // mpc (metres per character column) controls zoom level.
 
 const MAP_COLS = 22
-const MAP_ROWS = 8
+const MAP_ROWS = 3
 
 function buildMinimapContent(): string {
   if (!settings.minimap.visible) return ''
