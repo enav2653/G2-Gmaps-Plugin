@@ -20,6 +20,7 @@
 
 import {
   TextContainerProperty,
+  ImageContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 
 import { RouteStep } from './maps'
@@ -37,6 +38,10 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 
 // Minimap left padding in px
 const MAP_PAD_L = 4
+
+// Minimap image dimensions (must match Google Static Maps fetch size)
+export const MINIMAP_IMG_W = 200
+export const MINIMAP_IMG_H = BOTTOM_H   // 92
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
@@ -168,6 +173,21 @@ export function buildMinimapTextContainer(
     paddingLength: 2,
     content,
     isEventCapture: 0,
+  })
+}
+
+/** Minimap image container — bottom-left. Returns null if hidden. */
+export function buildMinimapImageContainer(
+  settings: HudSettings,
+): ImageContainerProperty | null {
+  if (!settings.minimap.visible) return null
+  return new ImageContainerProperty({
+    containerID:   CID.MAP,
+    containerName: 'minimap',
+    xPosition:     MAP_PAD_L,
+    yPosition:     BOTTOM_Y,
+    width:         MINIMAP_IMG_W,
+    height:        MINIMAP_IMG_H,
   })
 }
 

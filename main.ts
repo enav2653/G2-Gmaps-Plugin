@@ -5,22 +5,26 @@ import {
   RebuildPageContainer,
   TextContainerUpgrade,
   TextContainerProperty,
+  ImageContainerProperty,
+  ImageRawDataUpdate,
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { renderMapText } from './mapText'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
+import { fetchMinimapPng } from './mapImage'
 import {
   buildEventContainer,
   buildBannerContainer,
-  buildMinimapTextContainer,
+  buildMinimapImageContainer,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
   BANNER_MODES, BannerMode,
   NavState,
   CID,
+  MINIMAP_IMG_W,
+  MINIMAP_IMG_H,
 } from './hud'
 
 // ─── App state ────────────────────────────────────────────────────────────────
@@ -383,28 +387,26 @@ async function reroute() {
   }
 }
 
-// ─── Text minimap ─────────────────────────────────────────────────────────────
+// ─── Image minimap ────────────────────────────────────────────────────────────
 //
-// ASCII character grid rendered by renderMapText.
-// Uses the same TextContainerProperty path as banner + speed — no image
-// upload, no imageException possible.
+// Fetches a Google Static Maps snapshot, converts to 8-bit greyscale,
+// encodes as PNG, and uploads via updateImageRawData.
 //
-// Characters: . background  ~ future route  - current step  > turn  @ position
-// mpc (metres per character column) controls zoom level.
+// Only re-fetches when position changes by >50 m to limit API calls.
 
-const MAP_COLS = 22
-const MAP_ROWS = 3
+let lastMinimapLat  = 0
+let lastMinimapLng  = 0
+let minimapRefreshing = false
 
-function buildMinimapContent(): string {
-  if (!settings.minimap.visible) return ''
-  const distM = distToManeuverM()
-  const mpc   = distM < 400 ? 15 : distM < 1600 ? 30 : distM < 5000 ? 60 : 100
-  return renderMapText(currentLat, currentLng, steps, effectiveStepIdx(), MAP_COLS, MAP_ROWS, mpc)
+function minimapZoom(): number {
+  const d = distToManeuverM()
+  if (d <   400) return 17
+  if (d <  1600) return 16
+  if (d <  5000) return 15
+  return 14
 }
 
 // ─── Full page build ──────────────────────────────────────────────────────────
-//
-// All containers are TextContainerProperty — no image upload, no imageException.
 
 async function buildPage() {
   if (buildingPage) {
@@ -419,18 +421,20 @@ async function buildPage() {
       : undefined
     const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings)
-    const mapContent    = buildMinimapContent()
 
-    const containers: TextContainerProperty[] = [buildEventContainer()]
-    if (bannerMode !== 'always-off') containers.push(buildBannerContainer(bannerContent))
-    const mapContainer = buildMinimapTextContainer(mapContent, settings)
-    if (mapContainer) containers.push(mapContainer)
+    const textContainers: TextContainerProperty[] = [buildEventContainer()]
+    if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent))
     const speedContainer = buildSpeedContainer(speedContent, settings)
-    if (speedContainer) containers.push(speedContainer)
+    if (speedContainer) textContainers.push(speedContainer)
+
+    const imageContainers: ImageContainerProperty[] = []
+    const mapImgContainer = buildMinimapImageContainer(settings)
+    if (mapImgContainer) imageContainers.push(mapImgContainer)
 
     const containerData = {
-      containerTotalNum: containers.length,
-      textObject:        containers,
+      containerTotalNum: textContainers.length + imageContainers.length,
+      textObject:        textContainers,
+      imageObject:       imageContainers,
     }
 
     if (!pageCreated) {
@@ -447,6 +451,10 @@ async function buildPage() {
         reportStatus(`recreate: ${JSON.stringify(result)}`)
       }
     }
+
+    // Reset minimap position cache so the next refreshMinimap always uploads fresh
+    lastMinimapLat = 0
+    lastMinimapLng = 0
   } finally {
     buildingPage = false
   }
@@ -483,16 +491,30 @@ async function refreshSpeed() {
 }
 
 async function refreshMinimap() {
-  if (!settings.minimap.visible) return
-  const content = buildMinimapContent()
-  if (!content) return
-  await bridge.textContainerUpgrade(new TextContainerUpgrade({
-    containerID:   CID.MAP,
-    containerName: 'minimap',
-    content,
-    contentOffset: 0,
-    contentLength: content.length,
-  }))
+  if (!settings.minimap.visible || !pageCreated) return
+  if (!currentLat && !currentLng) return
+  // Skip if hasn't moved >50 m since last upload
+  if (haversine(currentLat, currentLng, lastMinimapLat, lastMinimapLng) < 50) return
+  if (minimapRefreshing) return
+
+  minimapRefreshing = true
+  const lat = currentLat
+  const lng = currentLng
+  try {
+    const pngData = await fetchMinimapPng(lat, lng, MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom())
+    await bridge.updateImageRawData(new ImageRawDataUpdate({
+      containerID:   CID.MAP,
+      containerName: 'minimap',
+      imageData:     pngData,
+    }))
+    lastMinimapLat = lat
+    lastMinimapLng = lng
+    reportStatus(`minimap: updated at ${lat.toFixed(4)},${lng.toFixed(4)}`)
+  } catch (e) {
+    reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    minimapRefreshing = false
+  }
 }
 
 // ─── GPS watch ────────────────────────────────────────────────────────────────
