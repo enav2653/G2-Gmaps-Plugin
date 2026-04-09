@@ -78,6 +78,7 @@ export function buildBannerText(
   stepIdx: number,
   state: NavState,
   bannerMode: BannerMode,
+  liveDistM?: number,
 ): string {
   if (state === 'idle')    return 'G2 Maps  •  Set a destination'
   if (state === 'passive') return 'Passive map  •  No active route'
@@ -87,7 +88,7 @@ export function buildBannerText(
   if (!step) return 'Finding location…'
 
   const instr = formatInstruction(step.instruction)
-  const dist  = formatDistance(step.distanceMeters)
+  const dist  = formatDistance(liveDistM ?? step.distanceMeters)
   const eta   = formatETA(steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0))
 
   // Mode indicator shown in always-off / as-needed so user knows they're not stuck

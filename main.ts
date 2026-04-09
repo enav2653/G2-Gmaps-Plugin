@@ -51,6 +51,18 @@ let buildingPage = false  // serialises concurrent buildPage calls
 let activeLocationProvider: (() => Promise<{ lat: number; lng: number } | null>) | null = null
 let androidPollTimer: ReturnType<typeof setInterval> | null = null
 
+// Manual step preview (swipe) — null means track navigation step
+let previewStepIdx:   number | null = null
+let previewResetTimer: ReturnType<typeof setTimeout> | null = null
+
+// Speed calculation from consecutive position fixes
+let prevPollLat  = 0
+let prevPollLng  = 0
+let prevPollTime = 0
+
+// Reroute guard
+let rerouteInProgress = false
+
 // ─── Bridge location probe ────────────────────────────────────────────────────
 //
 // The Even Hub WebView blocks navigator.geolocation (PERMISSION_DENIED).
@@ -172,22 +184,64 @@ async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null>
   return null
 }
 
-// ─── Android location polling ─────────────────────────────────────────────────
+// ─── Adaptive poll rate ───────────────────────────────────────────────────────
 //
-// Once a working provider is found, poll it every 3 s to keep
-// currentLat/currentLng live and auto-advance route steps.
+// Poll more frequently as we approach the next maneuver.
+// Distances in metres; times in ms.
+
+function pollIntervalMs(): number {
+  const d = distToManeuverM()
+  if (d <   400) return  250   // < 0.25 mi
+  if (d <  1600) return  500   // < 1 mi
+  if (d <  8000) return 1000   // < 5 mi
+  return 3000                  // >= 5 mi
+}
+
+function updatePollRate() {
+  if (!activeLocationProvider) return
+  const ms = pollIntervalMs()
+  stopAndroidPoll()
+  androidPollTimer = setInterval(pollLocation, ms)
+}
+
+// ─── Android location polling ─────────────────────────────────────────────────
 
 async function pollLocation() {
   if (!activeLocationProvider) return
   const loc = await activeLocationProvider()
   if (!loc) return
 
+  const now = Date.now()
+
+  // Derive speed from consecutive fixes (WebView GPS is blocked so we have no speed field)
+  if (prevPollTime > 0 && (prevPollLat || prevPollLng)) {
+    const distM = haversine(prevPollLat, prevPollLng, loc.lat, loc.lng)
+    const dtSec = (now - prevPollTime) / 1000
+    // Ignore implausible deltas (> 200 mph or < 100 ms)
+    if (dtSec >= 0.1 && dtSec < 30) {
+      const sample = distM / dtSec * 2.23694
+      if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3  // EMA smoothing
+    }
+  }
+  prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
+
   currentLat = loc.lat
   currentLng = loc.lng
 
   if (navState !== 'navigating') {
     await refreshSpeed()
+    updatePollRate()
     return
+  }
+
+  // Off-route detection — check distance from current step's path
+  if (!rerouteInProgress && steps[stepIdx]) {
+    const s = steps[stepIdx]
+    const offDist = distToSegmentM(loc.lat, loc.lng, s.startLat, s.startLng, s.endLat, s.endLng)
+    if (offDist > 150) {
+      await reroute()
+      return
+    }
   }
 
   const newIdx  = advanceStep(loc.lat, loc.lng)
@@ -197,19 +251,25 @@ async function pollLocation() {
   if (stepIdx >= steps.length) {
     navState = 'idle'
     steps    = []
+    previewStepIdx = null
     stopAndroidPoll()
     await buildPage(null)
     return
   }
 
+  // Update adaptive rate now that distance may have changed
+  updatePollRate()
+
   if (!stepped) {
+    // In-place text update only — live distance refresh without full rebuild
     await refreshBanner()
     await refreshSpeed()
     return
   }
 
-  // Step changed — rebuild with fresh minimap
-  syncPositionFromStep()
+  // Step changed — cancel any manual preview and rebuild
+  previewStepIdx = null
+  if (previewResetTimer) { clearTimeout(previewResetTimer); previewResetTimer = null }
   const mapBytes = await fetchMinimap()
   await buildPage(mapBytes)
 }
@@ -217,8 +277,9 @@ async function pollLocation() {
 function startAndroidPoll() {
   stopAndroidPoll()
   if (!activeLocationProvider) return
-  reportStatus('android poll: started (3 s)')
-  androidPollTimer = setInterval(pollLocation, 3000)
+  const ms = pollIntervalMs()
+  reportStatus(`android poll: started (${ms} ms)`)
+  androidPollTimer = setInterval(pollLocation, ms)
 }
 
 function stopAndroidPoll() {
@@ -240,8 +301,15 @@ function syncPositionFromStep() {
 }
 
 async function changeStep(newIdx: number) {
-  stepIdx = newIdx
-  syncPositionFromStep()
+  previewStepIdx = newIdx
+  // Auto-return to navigation step after 10 s of no further input
+  if (previewResetTimer) clearTimeout(previewResetTimer)
+  previewResetTimer = setTimeout(async () => {
+    previewStepIdx   = null
+    previewResetTimer = null
+    const mapBytes = await fetchMinimap()
+    await buildPage(mapBytes)
+  }, 10_000)
   const mapBytes = await fetchMinimap()
   await buildPage(mapBytes)
 }
@@ -257,11 +325,61 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 }
 
+/** Distance from a point to a line segment, in metres. */
+function distToSegmentM(
+  lat: number, lng: number,
+  aLat: number, aLng: number,
+  bLat: number, bLng: number,
+): number {
+  const cosLat = Math.cos(aLat * Math.PI / 180)
+  const px = (lng  - aLng) * cosLat, py = lat  - aLat
+  const dx = (bLng - aLng) * cosLat, dy = bLat - aLat
+  const len2 = dx*dx + dy*dy
+  const t    = len2 > 0 ? Math.max(0, Math.min(1, (px*dx + py*dy) / len2)) : 0
+  return haversine(lat, lng, aLat + t*dy, aLng + t*(bLng - aLng))
+}
+
+/** Metres from current position to the end of the current route step. */
+function distToManeuverM(): number {
+  const step = steps[stepIdx]
+  if (!step || (!currentLat && !currentLng)) return Infinity
+  return haversine(currentLat, currentLng, step.endLat, step.endLng)
+}
+
+/** Which step to DISPLAY — may differ from stepIdx when user is previewing. */
+function effectiveStepIdx(): number {
+  return previewStepIdx ?? stepIdx
+}
+
+/** Advance past any step whose endpoint we've entered (80 m threshold). */
 function advanceStep(lat: number, lng: number): number {
   for (let i = stepIdx; i < steps.length - 1; i++) {
-    if (haversine(lat, lng, steps[i].endLat, steps[i].endLng) < 30) return i + 1
+    if (haversine(lat, lng, steps[i].endLat, steps[i].endLng) < 80) return i + 1
   }
   return stepIdx
+}
+
+// ─── Rerouting ────────────────────────────────────────────────────────────────
+
+async function reroute() {
+  if (rerouteInProgress) return
+  rerouteInProgress = true
+  reportStatus('off route — rerouting…')
+  try {
+    const raw = sessionStorage.getItem('g2maps_destination')
+    if (!raw) return
+    const dest = JSON.parse(raw) as { lat: number; lng: number }
+    steps   = await getRoute({ lat: currentLat, lng: currentLng }, dest)
+    stepIdx = 0
+    previewStepIdx = null
+    reportStatus(`rerouted: ${steps.length} steps`)
+    const mapBytes = await fetchMinimap()
+    await buildPage(mapBytes)
+  } catch (e) {
+    reportStatus(`reroute failed: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    rerouteInProgress = false
+  }
 }
 
 // ─── Map image fetch + brightness ────────────────────────────────────────────
@@ -270,11 +388,17 @@ async function fetchMinimap(): Promise<number[] | null> {
   if (!settings.minimap.visible) return null
   try {
     const { w, h } = minimapDims(settings)
-    reportStatus(`minimap draw: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
+
+    // Zoom in as the maneuver approaches
+    const distM = distToManeuverM()
+    const mpp   = distM < 400 ? 2 : distM < 1600 ? 4 : distM < 5000 ? 8 : 12
+
+    reportStatus(`minimap draw: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h} mpp=${mpp}`)
     let pixels = await renderMapPixels({
       lat: currentLat, lng: currentLng,
-      steps, stepIdx,
+      steps, stepIdx: effectiveStepIdx(),
       widthPx: w, heightPx: h,
+      metersPerPx: mpp,
     })
     const pMin = Math.min(...pixels), pMax = Math.max(...pixels)
     reportStatus(`minimap px: len=${pixels.length} exp=${w*h} range=[${pMin},${pMax}]`)
@@ -301,7 +425,11 @@ async function buildPage(mapBytes: number[] | null = null) {
   }
   buildingPage = true
   try {
-    const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
+    const esi       = effectiveStepIdx()
+    const liveDistM = navState === 'navigating' && steps[esi]
+      ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
+      : undefined
+    const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
     const textContainers: TextContainerProperty[] = [buildEventContainer()]
@@ -360,7 +488,11 @@ async function buildPage(mapBytes: number[] | null = null) {
 
 async function refreshBanner() {
   if (bannerMode === 'always-off') return
-  const content = buildBannerText(steps, stepIdx, navState, bannerMode)
+  const esi       = effectiveStepIdx()
+  const liveDistM = navState === 'navigating' && steps[esi]
+    ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
+    : undefined
+  const content = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.BANNER,
     containerName: 'banner',
@@ -495,17 +627,19 @@ function setupInput() {
         break
       }
 
-      // Swipe up — previous step (manual review)
+      // Swipe up — previous step (manual preview)
       case OsEventTypeList.SCROLL_TOP_EVENT: {
-        if (!steps.length || stepIdx <= 0) break
-        await changeStep(stepIdx - 1)
+        const cur = effectiveStepIdx()
+        if (!steps.length || cur <= 0) break
+        await changeStep(cur - 1)
         break
       }
 
-      // Swipe down — skip to next step
+      // Swipe down — next step (manual preview)
       case OsEventTypeList.SCROLL_BOTTOM_EVENT: {
-        if (!steps.length || stepIdx >= steps.length - 1) break
-        await changeStep(stepIdx + 1)
+        const cur = effectiveStepIdx()
+        if (!steps.length || cur >= steps.length - 1) break
+        await changeStep(cur + 1)
         break
       }
     }
