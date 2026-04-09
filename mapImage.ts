@@ -22,9 +22,15 @@ async function fetchMapSnapshot(lat: number, lng: number, widthPx: number, heigh
   url.searchParams.set('maptype','roadmap')
   for (const s of DARK_STYLES) url.searchParams.append('style', s)
   url.searchParams.set('key', MAPS_KEY)
-  const res = await fetch(url.toString())
-  if (!res.ok) throw new Error(`Static Maps ${res.status}`)
-  return res.blob()
+  const ctrl  = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 6000)
+  try {
+    const res = await fetch(url.toString(), { signal: ctrl.signal })
+    if (!res.ok) throw new Error(`Static Maps ${res.status}`)
+    return res.blob()
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function imageBlobToGreyscale8bit(blob: Blob, w: number, h: number): Promise<Uint8Array> {

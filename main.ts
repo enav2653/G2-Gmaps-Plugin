@@ -464,6 +464,8 @@ async function buildPage() {
       }
     }
 
+    // Populate image container right after page create/rebuild
+    refreshMinimap()
   } finally {
     buildingPage = false
   }
@@ -500,11 +502,22 @@ async function refreshSpeed() {
 }
 
 async function refreshMinimap() {
-  if (!settings.minimap.visible || !pageCreated) return
-  if (!currentLat && !currentLng) return
-  if (minimapRefreshing) return
+  if (!settings.minimap.visible) {
+    reportStatus('minimap: hidden in settings')
+    return
+  }
+  if (!pageCreated) {
+    reportStatus('minimap: page not yet created')
+    return
+  }
+  if (!currentLat && !currentLng) {
+    reportStatus('minimap: no GPS fix yet')
+    return
+  }
+  if (minimapRefreshing) return   // silent skip when busy
 
   minimapRefreshing = true
+  reportStatus(`minimap: rendering (heading=${headingDeg.toFixed(0)}°)`)
   try {
     const pngData = await renderMinimapPng(
       currentLat, currentLng, steps, effectiveStepIdx(),
@@ -515,8 +528,9 @@ async function refreshMinimap() {
       containerName: 'minimap',
       imageData:     pngData,
     }))
+    reportStatus(`minimap: sent ${pngData.length} bytes`)
   } catch (e) {
-    reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
+    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
     minimapRefreshing = false
   }
