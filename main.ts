@@ -43,7 +43,7 @@ let pageCreated  = false
 let buildingPage = false  // serialises concurrent buildPage calls
 
 // Cached reference to whichever Android/bridge location method worked
-let activeLocationProvider: (() => Promise<{ lat: number; lng: number } | null>) | null = null
+let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number } | null>) | null = null
 let androidPollTimer: ReturnType<typeof setInterval> | null = null
 
 // Manual step preview (swipe) — null means track navigation step
@@ -665,12 +665,12 @@ export async function startNavigation() {
   const raw = sessionStorage.getItem('g2maps_destination')
   if (!raw) {
     navState = 'idle'
-    await buildPage(null)
+    await buildPage()
     return
   }
 
   navState = 'navigating'
-  await buildPage(null)
+  await buildPage()
 
   const dest   = JSON.parse(raw) as { lat: number; lng: number; label: string }
   const rawOrg = sessionStorage.getItem('g2maps_origin')
