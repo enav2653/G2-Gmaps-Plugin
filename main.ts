@@ -391,7 +391,7 @@ const MAP_COLS = 22
 const MAP_ROWS = 8
 
 function buildMinimapContent(): string {
-  if (!settings.minimap.visible || (!currentLat && !currentLng)) return ''
+  if (!settings.minimap.visible) return ''
   const distM = distToManeuverM()
   const mpc   = distM < 400 ? 15 : distM < 1600 ? 30 : distM < 5000 ? 60 : 100
   return renderMapText(currentLat, currentLng, steps, effectiveStepIdx(), MAP_COLS, MAP_ROWS, mpc)
