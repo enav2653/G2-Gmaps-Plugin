@@ -12,7 +12,7 @@ import {
 import { getRoute, RouteStep } from './maps'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
-import { fetchMinimapPng } from './mapImage'
+import { renderMinimapPng } from './mapImage'
 import {
   buildEventContainer,
   buildBannerContainer,
@@ -387,15 +387,11 @@ async function reroute() {
   }
 }
 
-// ─── Image minimap ────────────────────────────────────────────────────────────
+// ─── Vector minimap ───────────────────────────────────────────────────────────
 //
-// Fetches a Google Static Maps snapshot, converts to 8-bit greyscale,
-// encodes as PNG, and uploads via updateImageRawData.
-//
-// Only re-fetches when position changes by >50 m to limit API calls.
+// Pure pixel renderer — draws route polylines on a dark background,
+// encodes as PNG, uploads via updateImageRawData.  No API calls.
 
-let lastMinimapLat  = 0
-let lastMinimapLng  = 0
 let minimapRefreshing = false
 
 function minimapZoom(): number {
@@ -452,9 +448,6 @@ async function buildPage() {
       }
     }
 
-    // Reset minimap position cache so the next refreshMinimap always uploads fresh
-    lastMinimapLat = 0
-    lastMinimapLng = 0
   } finally {
     buildingPage = false
   }
@@ -493,23 +486,19 @@ async function refreshSpeed() {
 async function refreshMinimap() {
   if (!settings.minimap.visible || !pageCreated) return
   if (!currentLat && !currentLng) return
-  // Skip if hasn't moved >50 m since last upload
-  if (haversine(currentLat, currentLng, lastMinimapLat, lastMinimapLng) < 50) return
   if (minimapRefreshing) return
 
   minimapRefreshing = true
-  const lat = currentLat
-  const lng = currentLng
   try {
-    const pngData = await fetchMinimapPng(lat, lng, MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom())
+    const pngData = await renderMinimapPng(
+      currentLat, currentLng, steps, effectiveStepIdx(),
+      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
+    )
     await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,
       containerName: 'minimap',
       imageData:     pngData,
     }))
-    lastMinimapLat = lat
-    lastMinimapLng = lng
-    reportStatus(`minimap: updated at ${lat.toFixed(4)},${lng.toFixed(4)}`)
   } catch (e) {
     reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {

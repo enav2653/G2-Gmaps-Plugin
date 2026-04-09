@@ -13,6 +13,7 @@ export interface RouteStep {
   startLng: number
   endLat: number
   endLng: number
+  polylinePoints: Array<[number, number]>  // decoded step polyline (lat, lng pairs)
 }
 
 export async function getRoute(origin: LatLng, destination: LatLng): Promise<RouteStep[]> {
@@ -24,7 +25,7 @@ export async function getRoute(origin: LatLng, destination: LatLng): Promise<Rou
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': MAPS_KEY,
       'X-Goog-FieldMask':
-        'routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.startLocation,routes.legs.steps.endLocation',
+        'routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.legs.steps.staticDuration,routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.polyline.encodedPolyline',
     },
     body: JSON.stringify({
       origin:      { location: { latLng: { latitude: origin.lat,      longitude: origin.lng } } },
@@ -53,7 +54,36 @@ function mapStep(step: any): RouteStep {
     startLng:        step.startLocation?.latLng?.longitude ?? 0,
     endLat:          step.endLocation?.latLng?.latitude  ?? 0,
     endLng:          step.endLocation?.latLng?.longitude ?? 0,
+    polylinePoints:  step.polyline?.encodedPolyline
+      ? decodePolyline(step.polyline.encodedPolyline)
+      : [],
   }
+}
+
+// Google Encoded Polyline Algorithm Format decoder
+function decodePolyline(encoded: string): Array<[number, number]> {
+  const points: Array<[number, number]> = []
+  let lat = 0, lng = 0, i = 0
+  while (i < encoded.length) {
+    let chunk = 0, shift = 0, b: number
+    do {
+      b = encoded.charCodeAt(i++) - 63
+      chunk |= (b & 0x1f) << shift
+      shift += 5
+    } while (b >= 32)
+    lat += (chunk & 1) ? ~(chunk >> 1) : (chunk >> 1)
+
+    chunk = 0; shift = 0
+    do {
+      b = encoded.charCodeAt(i++) - 63
+      chunk |= (b & 0x1f) << shift
+      shift += 5
+    } while (b >= 32)
+    lng += (chunk & 1) ? ~(chunk >> 1) : (chunk >> 1)
+
+    points.push([lat / 1e5, lng / 1e5])
+  }
+  return points
 }
 
 export async function geocode(address: string): Promise<{ lat: number; lng: number; label: string }> {

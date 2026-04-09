@@ -1,39 +1,6 @@
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY as string
-
-export interface MapImageOptions {
-  widthPx:  number
-  heightPx: number
-  zoom:     number
-}
-
-// Dark map styles — black background, roads scaled by prominence.
-const DARK_STYLES = [
-  'feature:all|element:geometry|color:0x1a1a1a',
-  'feature:all|element:labels|visibility:off',
-  'feature:water|element:geometry|color:0x0a0a0a',
-  'feature:road|element:geometry|color:0x555555',
-  'feature:road.arterial|element:geometry|color:0x888888',
-  'feature:road.highway|element:geometry|color:0xdddddd',
-  'feature:road.highway|element:geometry.stroke|color:0x333333',
-]
-
-export async function fetchMapSnapshot(lat: number, lng: number, opts: MapImageOptions): Promise<Blob> {
-  const url = new URL('https://maps.googleapis.com/maps/api/staticmap')
-  url.searchParams.set('center', `${lat},${lng}`)
-  url.searchParams.set('zoom',   String(opts.zoom))
-  url.searchParams.set('size',   `${opts.widthPx}x${opts.heightPx}`)
-  url.searchParams.set('scale',  '1')
-  url.searchParams.set('maptype','roadmap')
-  url.searchParams.set('markers', `size:tiny|color:white|${lat},${lng}`)
-  for (const s of DARK_STYLES) url.searchParams.append('style', s)
-  url.searchParams.set('key', MAPS_KEY)
-
-  const res = await fetch(url.toString())
-  if (!res.ok) throw new Error(`Static Maps ${res.status}`)
-  return res.blob()
-}
-
-// ─── PNG encoder (following visionote's approach) ─────────────────────────────
+// ─── PNG encoder ─────────────────────────────────────────────────────────────
+// Matches visionote's approach: full 8-bit greyscale PNG passed to
+// updateImageRawData, not raw pixel values.
 
 function crc32(data: Uint8Array): number {
   let crc = 0xffffffff
@@ -117,49 +84,118 @@ async function encodeGreyscalePng(width: number, height: number, pixels: Uint8Ar
   return png
 }
 
-// ─── Blob → 8-bit greyscale pixels ───────────────────────────────────────────
+// ─── Vector minimap renderer ──────────────────────────────────────────────────
+//
+// Pure pixel-math renderer — no canvas, no API calls.
+// Draws the route as bright lines on a dark background.
+//
+// Brightness levels:
+//   20  — background
+//   50  — past steps (already driven)
+//   130 — upcoming steps
+//   240 — current step (thick)
+//   255 — position marker / turn point
 
-async function imageBlobToGreyscale8bit(blob: Blob, w: number, h: number): Promise<Uint8Array> {
-  const blobUrl = URL.createObjectURL(blob)
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image()
-    image.onload  = () => { URL.revokeObjectURL(blobUrl); resolve(image) }
-    image.onerror = (e) => { URL.revokeObjectURL(blobUrl); reject(e) }
-    image.src = blobUrl
-  })
-
-  const canvas = document.createElement('canvas')
-  canvas.width  = w
-  canvas.height = h
-  canvas.style.cssText = 'position:absolute;left:-9999px;top:-9999px;'
-  document.body.appendChild(canvas)
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(img, 0, 0, w, h)
-  const { data } = ctx.getImageData(0, 0, w, h)
-  document.body.removeChild(canvas)
-
-  const pixels = new Uint8Array(w * h)
-  for (let i = 0; i < w * h; i++) {
-    pixels[i] = Math.round(0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2])
-  }
-  return pixels
+interface StepCoords {
+  polylinePoints: Array<[number, number]>
+  startLat: number
+  startLng: number
+  endLat: number
+  endLng: number
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/**
- * Fetch a static map snapshot and return it as a PNG-encoded number[]
- * ready for ImageRawDataUpdate.imageData.
- */
-export async function fetchMinimapPng(
+export async function renderMinimapPng(
   lat: number,
   lng: number,
+  steps: StepCoords[],
+  stepIdx: number,
   w: number,
   h: number,
   zoom: number,
 ): Promise<number[]> {
-  const blob    = await fetchMapSnapshot(lat, lng, { widthPx: w, heightPx: h, zoom })
-  const pixels  = await imageBlobToGreyscale8bit(blob, w, h)
+  const METERS_PER_DEG = 111_320
+  const cosLat = Math.cos(lat * Math.PI / 180)
+  // metres per pixel at this zoom level and latitude
+  const mpp = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
+  const cx = w / 2
+  const cy = h / 2
+
+  const pixels = new Uint8Array(w * h).fill(20)
+
+  function toPixel(plat: number, plng: number): [number, number] {
+    const px = cx + (plng - lng) * cosLat * METERS_PER_DEG / mpp
+    const py = cy - (plat - lat) * METERS_PER_DEG / mpp
+    return [Math.round(px), Math.round(py)]
+  }
+
+  function setPixel(x: number, y: number, v: number) {
+    if (x >= 0 && x < w && y >= 0 && y < h) {
+      if (v > pixels[y * w + x]) pixels[y * w + x] = v
+    }
+  }
+
+  // Bresenham line — draws extra pixel for thick lines (current step)
+  function drawLine(x0: number, y0: number, x1: number, y1: number, v: number, thick: boolean) {
+    const dx = Math.abs(x1 - x0)
+    const dy = Math.abs(y1 - y0)
+    const sx = x0 < x1 ? 1 : -1
+    const sy = y0 < y1 ? 1 : -1
+    let err = dx - dy
+    for (;;) {
+      setPixel(x0, y0, v)
+      if (thick) {
+        // Thicken perpendicular to dominant direction
+        if (dx >= dy) { setPixel(x0, y0 + 1, v); setPixel(x0, y0 - 1, v) }
+        else          { setPixel(x0 + 1, y0, v); setPixel(x0 - 1, y0, v) }
+      }
+      if (x0 === x1 && y0 === y1) break
+      const e2 = 2 * err
+      if (e2 > -dy) { err -= dy; x0 += sx }
+      if (e2 <  dx) { err += dx; y0 += sy }
+    }
+  }
+
+  // Draw route segments
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i]
+    const past    = i < stepIdx
+    const current = i === stepIdx
+    const v       = past ? 50 : current ? 240 : 130
+    const thick   = current
+
+    // Use decoded polyline if available, else fall back to start→end straight line
+    const pts: Array<[number, number]> = s.polylinePoints.length >= 2
+      ? s.polylinePoints
+      : (s.startLat || s.startLng) && (s.endLat || s.endLng)
+        ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
+        : []
+
+    for (let j = 0; j < pts.length - 1; j++) {
+      const [px0, py0] = toPixel(pts[j][0],     pts[j][1])
+      const [px1, py1] = toPixel(pts[j + 1][0], pts[j + 1][1])
+      drawLine(px0, py0, px1, py1, v, thick)
+    }
+  }
+
+  // Next turn marker — small cross at end of current step
+  if (stepIdx < steps.length) {
+    const s = steps[stepIdx]
+    if (s.endLat || s.endLng) {
+      const [tx, ty] = toPixel(s.endLat, s.endLng)
+      setPixel(tx,     ty,     255)
+      setPixel(tx + 1, ty,     200); setPixel(tx - 1, ty,     200)
+      setPixel(tx,     ty + 1, 200); setPixel(tx,     ty - 1, 200)
+    }
+  }
+
+  // Position marker — filled diamond at current position
+  const [posX, posY] = toPixel(lat, lng)
+  setPixel(posX,     posY,     255)
+  setPixel(posX + 1, posY,     255); setPixel(posX - 1, posY,     255)
+  setPixel(posX,     posY + 1, 255); setPixel(posX,     posY - 1, 255)
+  setPixel(posX + 1, posY + 1, 200); setPixel(posX - 1, posY + 1, 200)
+  setPixel(posX + 1, posY - 1, 200); setPixel(posX - 1, posY - 1, 200)
+
   const pngBytes = await encodeGreyscalePng(w, h, pixels)
   return Array.from(pngBytes)
 }
