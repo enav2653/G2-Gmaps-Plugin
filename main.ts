@@ -44,7 +44,8 @@ let speedMph   = 0
 let limitMph:  number | null = null
 let watchId:    number | null = null
 let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
-let pageCreated = false
+let pageCreated  = false
+let buildingPage = false  // serialises concurrent buildPage calls
 
 // Cached reference to whichever Android/bridge location method worked
 let activeLocationProvider: (() => Promise<{ lat: number; lng: number } | null>) | null = null
@@ -254,53 +255,59 @@ async function fetchMinimap(): Promise<number[] | null> {
 // Tears down and rebuilds all containers.
 
 async function buildPage(mapBytes: number[] | null = null) {
-  const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
-  const speedContent  = buildSpeedText(speedMph, limitMph, settings)
-
-  const textContainers: TextContainerProperty[] = [buildEventContainer()]
-  const imageContainers: ImageContainerProperty[] = []
-
-  // Banner visibility:
-  //   always-on  → always show (except passive/idle handled via content)
-  //   as-needed  → shown here at build time; dimmed via opacity simulation is
-  //                not possible — we instead show a short version
-  //   always-off → omit container entirely
-  if (bannerMode !== 'always-off') {
-    textContainers.push(buildBannerContainer(bannerContent))
-  }
-
-  const mapContainer = buildMinimapContainer(settings)
-  if (mapContainer) imageContainers.push(mapContainer)
-
-  const speedContainer = buildSpeedContainer(speedContent, settings)
-  if (speedContainer) textContainers.push(speedContainer)
-
-  const containerData = {
-    containerTotalNum: textContainers.length + imageContainers.length,
-    textObject:        textContainers,
-    imageObject:       imageContainers.length ? imageContainers : undefined,
-  }
-
-  if (!pageCreated) {
-    const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
-    pageCreated = true
-    reportStatus(`create: ${JSON.stringify(result)}`)
-  } else {
-    const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
-    reportStatus(`rebuild: ${ok}`)
-  }
-
-  // Upload map image after page is created (SDK requirement)
-  if (!mapContainer || !mapBytes) {
-    reportStatus(`skip upload: container=${!!mapContainer} bytes=${!!mapBytes}`)
+  // Serialise concurrent calls — an overlapping rebuildPageContainer followed
+  // by updateImageRawData from a different call causes imageException.
+  if (buildingPage) {
+    reportStatus('buildPage: queued (dropping duplicate)')
     return
   }
-  const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
-    containerID:   CID.MAP,
-    containerName: 'minimap',
-    imageData:     mapBytes,
-  }))
-  reportStatus(`minimap upload: ${JSON.stringify(imgResult)}`)
+  buildingPage = true
+  try {
+    const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
+    const speedContent  = buildSpeedText(speedMph, limitMph, settings)
+
+    const textContainers: TextContainerProperty[] = [buildEventContainer()]
+    const imageContainers: ImageContainerProperty[] = []
+
+    if (bannerMode !== 'always-off') {
+      textContainers.push(buildBannerContainer(bannerContent))
+    }
+
+    const mapContainer = buildMinimapContainer(settings)
+    if (mapContainer) imageContainers.push(mapContainer)
+
+    const speedContainer = buildSpeedContainer(speedContent, settings)
+    if (speedContainer) textContainers.push(speedContainer)
+
+    const containerData = {
+      containerTotalNum: textContainers.length + imageContainers.length,
+      textObject:        textContainers,
+      imageObject:       imageContainers.length ? imageContainers : undefined,
+    }
+
+    if (!pageCreated) {
+      const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+      pageCreated = true
+      reportStatus(`create: ${JSON.stringify(result)}`)
+    } else {
+      const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+      reportStatus(`rebuild: ${ok}`)
+    }
+
+    // Upload map image immediately after its matching container build (no gaps)
+    if (!mapContainer || !mapBytes) {
+      reportStatus(`skip upload: container=${!!mapContainer} bytes=${!!mapBytes}`)
+      return
+    }
+    const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
+      containerID:   CID.MAP,
+      containerName: 'minimap',
+      imageData:     mapBytes,
+    }))
+    reportStatus(`minimap upload: ${JSON.stringify(imgResult)}`)
+  } finally {
+    buildingPage = false
+  }
 }
 
 // ─── In-place banner update (fast, no flicker) ────────────────────────────────
@@ -536,42 +543,43 @@ export async function startNavigation() {
   const rawOrg = sessionStorage.getItem('g2maps_origin')
 
   try {
+    // Always probe Android/bridge — sets activeLocationProvider for live polling
+    // even when an origin address is already known.
+    reportStatus('probing Android location…')
+    const bridgeLoc = await tryBridgeLocation()
+
     if (rawOrg) {
+      // Use typed origin as starting point (more reliable than live GPS for routing)
       const org  = JSON.parse(rawOrg) as { lat: number; lng: number; label: string }
       currentLat = org.lat
       currentLng = org.lng
       reportStatus(`origin: ${org.label}`)
+      if (bridgeLoc) reportStatus('android GPS active for live tracking')
+    } else if (bridgeLoc) {
+      currentLat = bridgeLoc.lat
+      currentLng = bridgeLoc.lng
+      reportStatus(`android GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
     } else {
-      // Try undocumented Even Hub bridge location method
-      reportStatus('trying bridge location…')
-      const bridgeLoc = await tryBridgeLocation()
-      if (bridgeLoc) {
-        currentLat = bridgeLoc.lat
-        currentLng = bridgeLoc.lng
-        reportStatus(`bridge GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
-        // activeLocationProvider is now set; start live polling after route loads
-      } else {
-        // Fall back to WebView geolocation (may be denied)
-        reportStatus('trying WebView GPS…')
-        try {
-          const pos = await new Promise<GeolocationPosition>((res, rej) => {
-            const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
-            navigator.geolocation.getCurrentPosition(
-              p => { clearTimeout(timer); res(p) },
-              e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
-              { enableHighAccuracy: false },
-            )
-          })
-          currentLat = pos.coords.latitude
-          currentLng = pos.coords.longitude
-          reportStatus(`WebView GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
-        } catch (gpsErr) {
-          reportStatus(`GPS failed: ${gpsErr instanceof Error ? gpsErr.message : String(gpsErr)}`)
-          reportStatus('enter a starting address to navigate')
-          navState = 'idle'
-          await buildPage(null)
-          return
-        }
+      // Fall back to WebView geolocation (blocked in Even Hub — prompts user to set origin)
+      reportStatus('trying WebView GPS…')
+      try {
+        const pos = await new Promise<GeolocationPosition>((res, rej) => {
+          const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
+          navigator.geolocation.getCurrentPosition(
+            p => { clearTimeout(timer); res(p) },
+            e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
+            { enableHighAccuracy: false },
+          )
+        })
+        currentLat = pos.coords.latitude
+        currentLng = pos.coords.longitude
+        reportStatus(`WebView GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+      } catch (gpsErr) {
+        reportStatus(`GPS failed: ${gpsErr instanceof Error ? gpsErr.message : String(gpsErr)}`)
+        reportStatus('enter a starting address to navigate')
+        navState = 'idle'
+        await buildPage(null)
+        return
       }
     }
 

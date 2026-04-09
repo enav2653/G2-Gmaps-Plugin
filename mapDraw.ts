@@ -151,7 +151,8 @@ export async function renderMapPixels(opts: DrawMapOptions): Promise<number[]> {
   const canvas = document.createElement('canvas')
   canvas.width  = widthPx
   canvas.height = heightPx
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('canvas 2d unavailable')
 
   // Black background
   ctx.fillStyle = '#000'
