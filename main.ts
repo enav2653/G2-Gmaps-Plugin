@@ -276,6 +276,8 @@ async function fetchMinimap(): Promise<number[] | null> {
       steps, stepIdx,
       widthPx: w, heightPx: h,
     })
+    const pMin = Math.min(...pixels), pMax = Math.max(...pixels)
+    reportStatus(`minimap px: len=${pixels.length} exp=${w*h} range=[${pMin},${pMax}]`)
     const br = settings.minimap.brightness / 100
     if (br < 1) pixels = applyBrightness(pixels, br)
     return pixels

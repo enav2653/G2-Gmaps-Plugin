@@ -151,8 +151,12 @@ export async function renderMapPixels(opts: DrawMapOptions): Promise<number[]> {
   const canvas = document.createElement('canvas')
   canvas.width  = widthPx
   canvas.height = heightPx
+  // Attach off-screen so WebViews that defer path rendering for detached
+  // canvases still execute fillRect / stroke / arc correctly.
+  canvas.style.cssText = 'position:absolute;left:-9999px;top:-9999px;'
+  document.body.appendChild(canvas)
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('canvas 2d unavailable')
+  if (!ctx) { document.body.removeChild(canvas); throw new Error('canvas 2d unavailable') }
 
   // Black background
   ctx.fillStyle = '#000'
@@ -225,6 +229,8 @@ export async function renderMapPixels(opts: DrawMapOptions): Promise<number[]> {
 
   // ── Convert to 4-bit greyscale number[] ───────────────────────────────────
   const { data } = ctx.getImageData(0, 0, widthPx, heightPx)
+  document.body.removeChild(canvas)
+
   const out: number[] = new Array(widthPx * heightPx)
   for (let i = 0; i < widthPx * heightPx; i++) {
     const luma = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
