@@ -10,7 +10,7 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { fetchMapSnapshot, imageToGreyscale4bit } from './mapImage'
+import { renderMapPixels } from './mapDraw'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
@@ -233,12 +233,12 @@ async function fetchMinimap(): Promise<number[] | null> {
   if (!settings.minimap.visible) return null
   try {
     const { w, h } = minimapDims(settings)
-    reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
-    const blob   = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
-    let pixels   = await imageToGreyscale4bit(blob, w, h)
-    const pMin = Math.min(...pixels.slice(0, 100))
-    const pMax = Math.max(...pixels.slice(0, 100))
-    reportStatus(`minimap px: ${pixels.length} sample min=${pMin} max=${pMax}`)
+    reportStatus(`minimap draw: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
+    let pixels = await renderMapPixels({
+      lat: currentLat, lng: currentLng,
+      steps, stepIdx,
+      widthPx: w, heightPx: h,
+    })
     const br = settings.minimap.brightness / 100
     if (br < 1) pixels = applyBrightness(pixels, br)
     return pixels
