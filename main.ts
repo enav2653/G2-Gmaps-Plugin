@@ -3,25 +3,21 @@ import {
   OsEventTypeList,
   CreateStartUpPageContainer,
   RebuildPageContainer,
-  ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
-  ImageContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { renderMapPixels } from './mapDraw'
+import { renderMapText } from './mapText'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
   buildEventContainer,
   buildBannerContainer,
-  buildMinimapContainer,
+  buildMinimapTextContainer,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
-  applyBrightness,
-  minimapDims,
   BANNER_MODES, BannerMode,
   NavState,
   CID,
@@ -43,7 +39,6 @@ let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
 let watchId:    number | null = null
-let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
 let pageCreated  = false
 let buildingPage = false  // serialises concurrent buildPage calls
 
@@ -70,13 +65,14 @@ let rerouteInProgress = false
 // Once a working provider is found it is cached in activeLocationProvider
 // so subsequent polls don't re-scan.
 
-function parseLocation(r: any): { lat: number; lng: number } | null {
+function parseLocation(r: any): { lat: number; lng: number; speedMs?: number } | null {
   if (r == null) return null
   if (typeof r === 'string') {
     try { r = JSON.parse(r) } catch { return null }
   }
-  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng }
-  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude }
+  const speedMs = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
+  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs }
+  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs }
   return null
 }
 
@@ -96,10 +92,11 @@ async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null>
   //   Task "GPS Server":
   //     Net → HTTP Server → Start, Port 7272
   //     Net → HTTP Server → Response, Path /location
-  //       Body: {"lat":%LOC,"lng":%LOCLNG}
+  //       Body: {"lat":%LOC1,"lng":%LOC2,"speed":%LOCSPEED}
+  //   (Variable Split %LOC on comma gives %LOC1=lat, %LOC2=lng; %LOCSPEED is m/s)
   //   Run this task on profile entry (e.g. App: Even Hub)
   //
-  // Expected response: {"lat": 37.123, "lng": -122.456}
+  // Expected response: {"lat": 37.123, "lng": -122.456, "speed": 13.4}
   //                 or {"latitude": 37.123, "longitude": -122.456}
   //
   const GPS_BRIDGE_URL = 'http://127.0.0.1:7272/location'
@@ -213,14 +210,15 @@ async function pollLocation() {
 
   const now = Date.now()
 
-  // Derive speed from consecutive fixes (WebView GPS is blocked so we have no speed field)
-  if (prevPollTime > 0 && (prevPollLat || prevPollLng)) {
+  // Speed — prefer GPS-reported m/s from Tasker (%LOCSPEED); fall back to position delta
+  if (loc.speedMs != null) {
+    speedMph = loc.speedMs * 2.23694
+  } else if (prevPollTime > 0 && (prevPollLat || prevPollLng)) {
     const distM = haversine(prevPollLat, prevPollLng, loc.lat, loc.lng)
     const dtSec = (now - prevPollTime) / 1000
-    // Ignore implausible deltas (> 200 mph or < 100 ms)
     if (dtSec >= 0.1 && dtSec < 30) {
       const sample = distM / dtSec * 2.23694
-      if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3  // EMA smoothing
+      if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
     }
   }
   prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
@@ -230,17 +228,20 @@ async function pollLocation() {
 
   if (navState !== 'navigating') {
     await refreshSpeed()
+    await refreshMinimap()
     updatePollRate()
     return
   }
 
-  // Off-route detection — check distance from current step's path
+  // Off-route detection — only when step has valid coordinates
   if (!rerouteInProgress && steps[stepIdx]) {
     const s = steps[stepIdx]
-    const offDist = distToSegmentM(loc.lat, loc.lng, s.startLat, s.startLng, s.endLat, s.endLng)
-    if (offDist > 150) {
-      await reroute()
-      return
+    if ((s.startLat || s.startLng) && (s.endLat || s.endLng)) {
+      const offDist = distToSegmentM(loc.lat, loc.lng, s.startLat, s.startLng, s.endLat, s.endLng)
+      if (offDist > 150) {
+        await reroute()
+        return
+      }
     }
   }
 
@@ -253,7 +254,7 @@ async function pollLocation() {
     steps    = []
     previewStepIdx = null
     stopAndroidPoll()
-    await buildPage(null)
+    await buildPage()
     return
   }
 
@@ -261,17 +262,17 @@ async function pollLocation() {
   updatePollRate()
 
   if (!stepped) {
-    // In-place text update only — live distance refresh without full rebuild
+    // In-place text update only — live updates without full rebuild
     await refreshBanner()
     await refreshSpeed()
+    await refreshMinimap()
     return
   }
 
   // Step changed — cancel any manual preview and rebuild
   previewStepIdx = null
   if (previewResetTimer) { clearTimeout(previewResetTimer); previewResetTimer = null }
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
+  await buildPage()
 }
 
 function startAndroidPoll() {
@@ -307,11 +308,9 @@ async function changeStep(newIdx: number) {
   previewResetTimer = setTimeout(async () => {
     previewStepIdx   = null
     previewResetTimer = null
-    const mapBytes = await fetchMinimap()
-    await buildPage(mapBytes)
+    await buildPage()
   }, 10_000)
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
+  await buildPage()
 }
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
@@ -343,6 +342,7 @@ function distToSegmentM(
 function distToManeuverM(): number {
   const step = steps[stepIdx]
   if (!step || (!currentLat && !currentLng)) return Infinity
+  if (!step.endLat && !step.endLng) return Infinity
   return haversine(currentLat, currentLng, step.endLat, step.endLng)
 }
 
@@ -354,7 +354,9 @@ function effectiveStepIdx(): number {
 /** Advance past any step whose endpoint we've entered (80 m threshold). */
 function advanceStep(lat: number, lng: number): number {
   for (let i = stepIdx; i < steps.length - 1; i++) {
-    if (haversine(lat, lng, steps[i].endLat, steps[i].endLng) < 80) return i + 1
+    const s = steps[i]
+    if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
+    if (haversine(lat, lng, s.endLat, s.endLng) < 80) return i + 1
   }
   return stepIdx
 }
@@ -373,8 +375,7 @@ async function reroute() {
     stepIdx = 0
     previewStepIdx = null
     reportStatus(`rerouted: ${steps.length} steps`)
-    const mapBytes = await fetchMinimap()
-    await buildPage(mapBytes)
+    await buildPage()
   } catch (e) {
     reportStatus(`reroute failed: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
@@ -382,43 +383,26 @@ async function reroute() {
   }
 }
 
-// ─── Map image fetch + brightness ────────────────────────────────────────────
+// ─── Text minimap content ─────────────────────────────────────────────────────
 
-async function fetchMinimap(): Promise<number[] | null> {
-  if (!settings.minimap.visible) return null
-  try {
-    const { w, h } = minimapDims(settings)
+// Character grid: 22 cols × 8 rows.
+// mpc (metres per character column) controls zoom; halved for close maneuvers.
+const MAP_COLS = 22
+const MAP_ROWS = 8
 
-    // Zoom in as the maneuver approaches
-    const distM = distToManeuverM()
-    const mpp   = distM < 400 ? 2 : distM < 1600 ? 4 : distM < 5000 ? 8 : 12
-
-    reportStatus(`minimap draw: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h} mpp=${mpp}`)
-    let pixels = await renderMapPixels({
-      lat: currentLat, lng: currentLng,
-      steps, stepIdx: effectiveStepIdx(),
-      widthPx: w, heightPx: h,
-      metersPerPx: mpp,
-    })
-    const pMin = Math.min(...pixels), pMax = Math.max(...pixels)
-    reportStatus(`minimap px: len=${pixels.length} exp=${w*h} range=[${pMin},${pMax}]`)
-    const br = settings.minimap.brightness / 100
-    if (br < 1) pixels = applyBrightness(pixels, br)
-    return pixels
-  } catch (e) {
-    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
-    return null
-  }
+function buildMinimapContent(): string {
+  if (!settings.minimap.visible || (!currentLat && !currentLng)) return ''
+  const distM = distToManeuverM()
+  const mpc   = distM < 400 ? 15 : distM < 1600 ? 30 : distM < 5000 ? 60 : 100
+  return renderMapText(currentLat, currentLng, steps, effectiveStepIdx(), MAP_COLS, MAP_ROWS, mpc)
 }
 
 // ─── Full page build ──────────────────────────────────────────────────────────
 //
 // Called on first load, step change, settings change, or state change.
-// Tears down and rebuilds all containers.
+// All containers are text — no image upload, no imageException possible.
 
-async function buildPage(mapBytes: number[] | null = null) {
-  // Serialise concurrent calls — an overlapping rebuildPageContainer followed
-  // by updateImageRawData from a different call causes imageException.
+async function buildPage() {
   if (buildingPage) {
     reportStatus('buildPage: queued (dropping duplicate)')
     return
@@ -431,24 +415,23 @@ async function buildPage(mapBytes: number[] | null = null) {
       : undefined
     const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings)
+    const mapContent    = buildMinimapContent()
 
-    const textContainers: TextContainerProperty[] = [buildEventContainer()]
-    const imageContainers: ImageContainerProperty[] = []
+    const containers: TextContainerProperty[] = [buildEventContainer()]
 
     if (bannerMode !== 'always-off') {
-      textContainers.push(buildBannerContainer(bannerContent))
+      containers.push(buildBannerContainer(bannerContent))
     }
 
-    const mapContainer = buildMinimapContainer(settings)
-    if (mapContainer) imageContainers.push(mapContainer)
+    const mapContainer = buildMinimapTextContainer(mapContent, settings)
+    if (mapContainer) containers.push(mapContainer)
 
     const speedContainer = buildSpeedContainer(speedContent, settings)
-    if (speedContainer) textContainers.push(speedContainer)
+    if (speedContainer) containers.push(speedContainer)
 
     const containerData = {
-      containerTotalNum: textContainers.length + imageContainers.length,
-      textObject:        textContainers,
-      imageObject:       imageContainers.length ? imageContainers : undefined,
+      containerTotalNum: containers.length,
+      textObject:        containers,
     }
 
     if (!pageCreated) {
@@ -459,26 +442,12 @@ async function buildPage(mapBytes: number[] | null = null) {
       const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
       reportStatus(`rebuild: ${ok}`)
       if (!ok) {
-        // rebuildPageContainer returned false (failure) — recreate from scratch
-        // so the image container is in a valid state before uploading pixels.
         pageCreated = false
         const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
         pageCreated = true
         reportStatus(`recreate: ${JSON.stringify(result)}`)
       }
     }
-
-    // Upload map image immediately after its matching container build (no gaps)
-    if (!mapContainer || !mapBytes) {
-      reportStatus(`skip upload: container=${!!mapContainer} bytes=${!!mapBytes}`)
-      return
-    }
-    const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
-      containerID:   CID.MAP,
-      containerName: 'minimap',
-      imageData:     mapBytes,
-    }))
-    reportStatus(`minimap upload: ${JSON.stringify(imgResult)}`)
   } finally {
     buildingPage = false
   }
@@ -514,6 +483,19 @@ async function refreshSpeed() {
   }))
 }
 
+async function refreshMinimap() {
+  if (!settings.minimap.visible) return
+  const content = buildMinimapContent()
+  if (!content) return
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.MAP,
+    containerName: 'minimap',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
+}
+
 // ─── GPS watch ────────────────────────────────────────────────────────────────
 
 function startGPS() {
@@ -543,21 +525,20 @@ function startGPS() {
       if (stepIdx >= steps.length) {
         navState = 'idle'
         steps    = []
-        const mapBytes = await fetchMinimap()
-        await buildPage(mapBytes)
+        await buildPage()
         return
       }
 
       if (!stepped) {
         // Same step — refresh text in-place
         await refreshBanner()
-        await refreshSpeed()   // speed number + limit both live here
+        await refreshSpeed()
+        await refreshMinimap()
         return
       }
 
-      // Step changed — rebuild page with fresh minimap
-      const mapBytes = await fetchMinimap()
-      await buildPage(mapBytes)
+      // Step changed — rebuild page
+      await buildPage()
     },
     (err) => console.error('GPS error', err),
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 },
@@ -569,25 +550,6 @@ function stopGPS() {
     navigator.geolocation.clearWatch(watchId)
     watchId = null
   }
-}
-
-// ─── Minimap rotation refresh (every 5s) ─────────────────────────────────────
-//
-// The map image doesn't auto-rotate — we re-fetch periodically so the
-// map stays roughly centred on current position.
-// Heading rotation is applied server-side via the Static Maps `heading` param.
-
-function startMapRefresh() {
-  stopMapRefresh()
-  mapRefreshTimer = setInterval(async () => {
-    if (navState === 'idle') return
-    const mapBytes = await fetchMinimap()
-    await buildPage(mapBytes)
-  }, 5000)
-}
-
-function stopMapRefresh() {
-  if (mapRefreshTimer) { clearInterval(mapRefreshTimer); mapRefreshTimer = null }
 }
 
 // ─── IMU — heading tracking ───────────────────────────────────────────────────
@@ -609,14 +571,12 @@ function setupInput() {
         if (navState === 'paused') {
           // Tap to resume from paused state
           navState = 'navigating'
-          const mapBytes = await fetchMinimap()
-          await buildPage(mapBytes)
+          await buildPage()
           return
         }
         bannerModeIdx = (bannerModeIdx + 1) % BANNER_MODES.length
         bannerMode    = BANNER_MODES[bannerModeIdx]
-        const mapBytes = await fetchMinimap()
-        await buildPage(mapBytes)
+        await buildPage()
         break
       }
 
@@ -657,31 +617,25 @@ export async function menuPauseResume() {
     stopGPS()
     stopAndroidPoll()
   }
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
+  await buildPage()
 }
 
 export async function menuPassiveMode() {
   if (navState !== 'passive') {
     navState = 'passive'
     stopGPS()
-    const mapBytes = await fetchMinimap()
-    await buildPage(mapBytes)
-    startMapRefresh()
+    await buildPage()
     return
   }
 
   // Return to navigation if we have a route
   navState = steps.length ? 'navigating' : 'idle'
   if (navState === 'navigating') startGPS()
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
-  startMapRefresh()
+  await buildPage()
 }
 
 export async function menuEndNavigation() {
   stopGPS()
-  stopMapRefresh()
   stopAndroidPoll()
   resetSpeedLimitCache()
   limitMph = null
@@ -690,22 +644,21 @@ export async function menuEndNavigation() {
   navState = 'idle'
   sessionStorage.removeItem('g2maps_destination')
   sessionStorage.removeItem('g2maps_origin')
-  await buildPage(null)
+  await buildPage()
 }
 
 // ─── Settings hot-reload (called when user saves settings on phone) ───────────
 
 export async function reloadSettings() {
   settings = loadSettings()
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
+  await buildPage()
 }
 
 // ─── Navigation start ─────────────────────────────────────────────────────────
 
 export async function startNavigation() {
   stopGPS()
-  stopMapRefresh()
+  stopAndroidPoll()
   resetSpeedLimitCache()
   limitMph = null
 
@@ -758,7 +711,7 @@ export async function startNavigation() {
         reportStatus(`GPS failed: ${gpsErr instanceof Error ? gpsErr.message : String(gpsErr)}`)
         reportStatus('enter a starting address to navigate')
         navState = 'idle'
-        await buildPage(null)
+        await buildPage()
         return
       }
     }
@@ -770,15 +723,14 @@ export async function startNavigation() {
 
     if (!steps.length) {
       navState = 'idle'
-      await buildPage(null)
+      await buildPage()
       return
     }
 
     // Use step 0's start coordinates (more precise than geocoded address)
     syncPositionFromStep()
 
-    const mapBytes = await fetchMinimap()
-    await buildPage(mapBytes)
+    await buildPage()
 
     // Prefer Android location polling when available; fall back to WebView GPS
     if (activeLocationProvider) {
@@ -786,13 +738,12 @@ export async function startNavigation() {
     } else {
       startGPS()
     }
-    startMapRefresh()
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     reportStatus(`nav error: ${msg}`)
     navState = 'idle'
-    await buildPage(null)
+    await buildPage()
     throw err
   }
 }
@@ -817,13 +768,11 @@ async function init() {
     if (sys.eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT) {
       refreshBanner()
       refreshSpeed()
-    }
-    if (sys.eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT) {
-      stopMapRefresh()
+      refreshMinimap()
     }
   })
 
-  await buildPage(null)
+  await buildPage()
 
   // Listen for phone-side events
   window.addEventListener('g2maps:navigate',  () => startNavigation())
