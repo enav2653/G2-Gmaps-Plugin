@@ -3,24 +3,21 @@ import {
   OsEventTypeList,
   CreateStartUpPageContainer,
   RebuildPageContainer,
-  ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
-  ImageContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { fetchMapSnapshot, imageToGreyscale4bit } from './mapImage'
+import { renderMapText } from './mapText'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
   buildEventContainer,
   buildBannerContainer,
-  buildMinimapContainer,
+  buildMinimapTextContainer,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
-  minimapDims,
   BANNER_MODES, BannerMode,
   NavState,
   CID,
@@ -386,41 +383,28 @@ async function reroute() {
   }
 }
 
-// ─── Map image fetch ──────────────────────────────────────────────────────────
+// ─── Text minimap ─────────────────────────────────────────────────────────────
 //
-// Fetches a dark-styled Google Static Maps PNG and converts to 4-bit
-// greyscale (values 0–15, one per pixel) for ImageRawDataUpdate.
+// ASCII character grid rendered by renderMapText.
+// Uses the same TextContainerProperty path as banner + speed — no image
+// upload, no imageException possible.
+//
+// Characters: . background  ~ future route  - current step  > turn  @ position
+// mpc (metres per character column) controls zoom level.
 
-async function fetchMinimap(): Promise<number[] | null> {
-  if (!settings.minimap.visible || (!currentLat && !currentLng)) return null
-  try {
-    const { w, h } = minimapDims(settings)
-    const distM = distToManeuverM()
-    // Zoom in as the maneuver approaches
-    const zoom = distM < 400 ? 17 : distM < 1600 ? 16 : distM < 5000 ? 15 : 14
+const MAP_COLS = 22
+const MAP_ROWS = 8
 
-    reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h} z=${zoom}`)
-    const blob   = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom })
-    let   pixels = await imageToGreyscale4bit(blob, w, h)
-
-    // Apply brightness setting
-    const br = settings.minimap.brightness / 100
-    if (br < 1) pixels = pixels.map(v => Math.round(v * br))
-
-    reportStatus(`minimap px: len=${pixels.length} range=[${Math.min(...pixels)},${Math.max(...pixels)}]`)
-    return pixels
-  } catch (e) {
-    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
-    return null
-  }
+function buildMinimapContent(): string {
+  if (!settings.minimap.visible) return ''
+  const distM = distToManeuverM()
+  const mpc   = distM < 400 ? 15 : distM < 1600 ? 30 : distM < 5000 ? 60 : 100
+  return renderMapText(currentLat, currentLng, steps, effectiveStepIdx(), MAP_COLS, MAP_ROWS, mpc)
 }
 
 // ─── Full page build ──────────────────────────────────────────────────────────
 //
-// Rebuilds all containers.  Image upload is skipped when the rebuild path
-// had to fall back to createStartUpPageContainer — the SDK leaves the image
-// buffer in an invalid state after a failed rebuild, so we let the next
-// refreshMinimap() poll upload the image once the container is clean.
+// All containers are TextContainerProperty — no image upload, no imageException.
 
 async function buildPage() {
   if (buildingPage) {
@@ -429,63 +413,39 @@ async function buildPage() {
   }
   buildingPage = true
   try {
-    const mapBytes = await fetchMinimap()
-
     const esi       = effectiveStepIdx()
     const liveDistM = navState === 'navigating' && steps[esi]
       ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
       : undefined
     const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings)
+    const mapContent    = buildMinimapContent()
 
-    const textContainers: TextContainerProperty[] = [buildEventContainer()]
-    const imageContainers: ImageContainerProperty[] = []
-
-    if (bannerMode !== 'always-off') {
-      textContainers.push(buildBannerContainer(bannerContent))
-    }
-
-    const mapContainer = buildMinimapContainer(settings)
-    if (mapContainer) imageContainers.push(mapContainer)
-
+    const containers: TextContainerProperty[] = [buildEventContainer()]
+    if (bannerMode !== 'always-off') containers.push(buildBannerContainer(bannerContent))
+    const mapContainer = buildMinimapTextContainer(mapContent, settings)
+    if (mapContainer) containers.push(mapContainer)
     const speedContainer = buildSpeedContainer(speedContent, settings)
-    if (speedContainer) textContainers.push(speedContainer)
+    if (speedContainer) containers.push(speedContainer)
 
     const containerData = {
-      containerTotalNum: textContainers.length + imageContainers.length,
-      textObject:        textContainers,
-      imageObject:       imageContainers.length ? imageContainers : undefined,
+      containerTotalNum: containers.length,
+      textObject:        containers,
     }
 
-    let freshCreate = false
     if (!pageCreated) {
       const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
-      pageCreated  = true
-      freshCreate  = true
+      pageCreated = true
       reportStatus(`create: ${JSON.stringify(result)}`)
     } else {
       const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
       reportStatus(`rebuild: ${ok}`)
       if (!ok) {
-        // Rebuild failed — recreate, but skip image upload this round.
-        // The failed rebuild leaves the image buffer dirty; refreshMinimap()
-        // will upload on the next poll once the container is clean.
         pageCreated = false
         const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
         pageCreated = true
-        reportStatus(`recreate: ${JSON.stringify(result)} (image upload deferred)`)
-        return
+        reportStatus(`recreate: ${JSON.stringify(result)}`)
       }
-    }
-
-    if (mapContainer && mapBytes) {
-      reportStatus(`minimap upload: freshCreate=${freshCreate}`)
-      const r = await bridge.updateImageRawData(new ImageRawDataUpdate({
-        containerID:   CID.MAP,
-        containerName: 'minimap',
-        imageData:     mapBytes,
-      }))
-      reportStatus(`minimap upload result: ${JSON.stringify(r)}`)
     }
   } finally {
     buildingPage = false
@@ -524,17 +484,15 @@ async function refreshSpeed() {
 
 async function refreshMinimap() {
   if (!settings.minimap.visible) return
-  const mapBytes = await fetchMinimap()
-  if (!mapBytes) return
-  try {
-    await bridge.updateImageRawData(new ImageRawDataUpdate({
-      containerID:   CID.MAP,
-      containerName: 'minimap',
-      imageData:     mapBytes,
-    }))
-  } catch (e) {
-    reportStatus(`minimap refresh: ${e instanceof Error ? e.message : String(e)}`)
-  }
+  const content = buildMinimapContent()
+  if (!content) return
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.MAP,
+    containerName: 'minimap',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
 }
 
 // ─── GPS watch ────────────────────────────────────────────────────────────────
