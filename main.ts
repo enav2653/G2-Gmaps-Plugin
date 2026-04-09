@@ -78,6 +78,42 @@ async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null>
   )
   reportStatus(`window bridge keys: [${bridgeKeys.join(', ')}]`)
 
+  // --- 0. Local GPS bridge — Tasker HTTP server or companion app ----------
+  //
+  // Tasker setup (5.9+):
+  //   Task "GPS Server":
+  //     Net → HTTP Server → Start, Port 7272
+  //     Net → HTTP Server → Response, Path /location
+  //       Body: {"lat":%LOC,"lng":%LOCLNG}
+  //   Run this task on profile entry (e.g. App: Even Hub)
+  //
+  // Expected response: {"lat": 37.123, "lng": -122.456}
+  //                 or {"latitude": 37.123, "longitude": -122.456}
+  //
+  const GPS_BRIDGE_URL = 'http://127.0.0.1:7272/location'
+  try {
+    const ctrl  = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 800)
+    const res   = await fetch(GPS_BRIDGE_URL, { signal: ctrl.signal })
+    clearTimeout(timer)
+    if (res.ok) {
+      const loc = parseLocation(await res.json())
+      if (loc) {
+        reportStatus(`local GPS bridge: OK (${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)})`)
+        activeLocationProvider = async () => {
+          try {
+            const c = new AbortController()
+            const t = setTimeout(() => c.abort(), 800)
+            const r = await fetch(GPS_BRIDGE_URL, { signal: c.signal })
+            clearTimeout(t)
+            return r.ok ? parseLocation(await r.json()) : null
+          } catch { return null }
+        }
+        return loc
+      }
+    }
+  } catch { /* server not running */ }
+
   // --- 1. Flutter InAppWebView callHandler ---
   const fwv = (window as any).flutter_inappwebview
   if (fwv?.callHandler) {
