@@ -330,6 +330,14 @@ async function buildPage(mapBytes: number[] | null = null) {
     } else {
       const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
       reportStatus(`rebuild: ${ok}`)
+      if (!ok) {
+        // rebuildPageContainer returned false (failure) — recreate from scratch
+        // so the image container is in a valid state before uploading pixels.
+        pageCreated = false
+        const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+        pageCreated = true
+        reportStatus(`recreate: ${JSON.stringify(result)}`)
+      }
     }
 
     // Upload map image immediately after its matching container build (no gaps)
