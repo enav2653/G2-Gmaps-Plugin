@@ -10,7 +10,7 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { renderMapPixels } from './mapDraw'
+import { fetchMapSnapshot, imageToGreyscale4bit } from './mapImage'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
@@ -388,28 +388,26 @@ async function reroute() {
 
 // ─── Map image fetch ──────────────────────────────────────────────────────────
 //
-// Returns 4-bit greyscale values, one integer per pixel (values 0–15).
-// This is the format the SDK bridge expects: List<int> with values 0–15.
+// Fetches a dark-styled Google Static Maps PNG and converts to 4-bit
+// greyscale (values 0–15, one per pixel) for ImageRawDataUpdate.
 
 async function fetchMinimap(): Promise<number[] | null> {
   if (!settings.minimap.visible || (!currentLat && !currentLng)) return null
   try {
     const { w, h } = minimapDims(settings)
     const distM = distToManeuverM()
-    const mpp   = distM < 400 ? 2 : distM < 1600 ? 4 : distM < 5000 ? 8 : 12
+    // Zoom in as the maneuver approaches
+    const zoom = distM < 400 ? 17 : distM < 1600 ? 16 : distM < 5000 ? 15 : 14
 
-    let pixels = await renderMapPixels({
-      lat: currentLat, lng: currentLng,
-      steps, stepIdx: effectiveStepIdx(),
-      widthPx: w, heightPx: h,
-      metersPerPx: mpp,
-    })
+    reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h} z=${zoom}`)
+    const blob   = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom })
+    let   pixels = await imageToGreyscale4bit(blob, w, h)
 
-    // Apply brightness (settings 0–100 → scale 0.0–1.0)
+    // Apply brightness setting
     const br = settings.minimap.brightness / 100
     if (br < 1) pixels = pixels.map(v => Math.round(v * br))
 
-    reportStatus(`minimap px: ${w}x${h} len=${pixels.length} range=[${Math.min(...pixels)},${Math.max(...pixels)}]`)
+    reportStatus(`minimap px: len=${pixels.length} range=[${Math.min(...pixels)},${Math.max(...pixels)}]`)
     return pixels
   } catch (e) {
     reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
