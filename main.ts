@@ -54,10 +54,11 @@ let androidPollTimer: ReturnType<typeof setInterval> | null = null
 let previewStepIdx:   number | null = null
 let previewResetTimer: ReturnType<typeof setTimeout> | null = null
 
-// Speed calculation from consecutive position fixes
+// Speed and heading from consecutive position fixes
 let prevPollLat  = 0
 let prevPollLng  = 0
 let prevPollTime = 0
+let headingDeg   = 0   // degrees clockwise from north, smoothed EMA
 
 // Reroute guard
 let rerouteInProgress = false
@@ -224,6 +225,11 @@ async function pollLocation() {
       const sample = distM / dtSec * 2.23694
       if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
     }
+    // Heading — only update when we've moved enough to get a reliable bearing
+    if (distM > 5) {
+      const bearing = gpsHeading(prevPollLat, prevPollLng, loc.lat, loc.lng)
+      headingDeg = headingDeg * 0.6 + bearing * 0.4   // smooth EMA
+    }
   }
   prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
 
@@ -318,6 +324,16 @@ async function changeStep(newIdx: number) {
 }
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
+
+/** Bearing in degrees clockwise from north, from point 1 → point 2. */
+function gpsHeading(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const φ1 = lat1 * Math.PI / 180
+  const φ2 = lat2 * Math.PI / 180
+  const Δλ = (lng2 - lng1) * Math.PI / 180
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+}
 
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R    = 6371000
@@ -492,7 +508,7 @@ async function refreshMinimap() {
   try {
     const pngData = await renderMinimapPng(
       currentLat, currentLng, steps, effectiveStepIdx(),
-      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
+      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(), headingDeg,
     )
     await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,

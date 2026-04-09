@@ -39,9 +39,11 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 4
 
-// Minimap image dimensions (must match Google Static Maps fetch size)
-export const MINIMAP_IMG_W = 200
-export const MINIMAP_IMG_H = BOTTOM_H   // 92
+// Minimap image dimensions — 3:4 portrait ratio, anchored to bottom-left
+// The top edge sits at y=168, extending into the otherwise-empty clear zone.
+export const MINIMAP_IMG_W = 90
+export const MINIMAP_IMG_H = 120
+const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H   // 168
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
@@ -176,7 +178,7 @@ export function buildMinimapTextContainer(
   })
 }
 
-/** Minimap image container — bottom-left. Returns null if hidden. */
+/** Minimap image container — bottom-left, 3:4 portrait. Returns null if hidden. */
 export function buildMinimapImageContainer(
   settings: HudSettings,
 ): ImageContainerProperty | null {
@@ -185,7 +187,7 @@ export function buildMinimapImageContainer(
     containerID:   CID.MAP,
     containerName: 'minimap',
     xPosition:     MAP_PAD_L,
-    yPosition:     BOTTOM_Y,
+    yPosition:     MINIMAP_Y,
     width:         MINIMAP_IMG_W,
     height:        MINIMAP_IMG_H,
   })
