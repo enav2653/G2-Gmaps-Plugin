@@ -388,8 +388,8 @@ async function reroute() {
 
 // ─── Map image fetch ──────────────────────────────────────────────────────────
 //
-// Returns packed 4-bit greyscale bytes: 2 pixels per element, high nibble first.
-// This is the format required by ImageRawDataUpdate.imageData.
+// Returns 4-bit greyscale values, one integer per pixel (values 0–15).
+// This is the format the SDK bridge expects: List<int> with values 0–15.
 
 async function fetchMinimap(): Promise<number[] | null> {
   if (!settings.minimap.visible || (!currentLat && !currentLng)) return null
@@ -409,12 +409,8 @@ async function fetchMinimap(): Promise<number[] | null> {
     const br = settings.minimap.brightness / 100
     if (br < 1) pixels = pixels.map(v => Math.round(v * br))
 
-    // Pack: 2 pixels per byte, high nibble = left pixel, low nibble = right pixel
-    const packed: number[] = new Array(Math.ceil(pixels.length / 2))
-    for (let i = 0; i < packed.length; i++) {
-      packed[i] = ((pixels[i * 2] & 0xF) << 4) | ((pixels[i * 2 + 1] ?? 0) & 0xF)
-    }
-    return packed
+    reportStatus(`minimap px: ${w}x${h} len=${pixels.length} range=[${Math.min(...pixels)},${Math.max(...pixels)}]`)
+    return pixels
   } catch (e) {
     reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
     return null
@@ -423,8 +419,10 @@ async function fetchMinimap(): Promise<number[] | null> {
 
 // ─── Full page build ──────────────────────────────────────────────────────────
 //
-// Rebuilds all containers and uploads the minimap image.
-// mapBytes must already be packed (2 pixels per byte).
+// Rebuilds all containers.  Image upload is skipped when the rebuild path
+// had to fall back to createStartUpPageContainer — the SDK leaves the image
+// buffer in an invalid state after a failed rebuild, so we let the next
+// refreshMinimap() poll upload the image once the container is clean.
 
 async function buildPage() {
   if (buildingPage) {
@@ -461,28 +459,35 @@ async function buildPage() {
       imageObject:       imageContainers.length ? imageContainers : undefined,
     }
 
+    let freshCreate = false
     if (!pageCreated) {
       const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
-      pageCreated = true
+      pageCreated  = true
+      freshCreate  = true
       reportStatus(`create: ${JSON.stringify(result)}`)
     } else {
       const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
       reportStatus(`rebuild: ${ok}`)
       if (!ok) {
+        // Rebuild failed — recreate, but skip image upload this round.
+        // The failed rebuild leaves the image buffer dirty; refreshMinimap()
+        // will upload on the next poll once the container is clean.
         pageCreated = false
         const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
         pageCreated = true
-        reportStatus(`recreate: ${JSON.stringify(result)}`)
+        reportStatus(`recreate: ${JSON.stringify(result)} (image upload deferred)`)
+        return
       }
     }
 
     if (mapContainer && mapBytes) {
+      reportStatus(`minimap upload: freshCreate=${freshCreate}`)
       const r = await bridge.updateImageRawData(new ImageRawDataUpdate({
         containerID:   CID.MAP,
         containerName: 'minimap',
         imageData:     mapBytes,
       }))
-      reportStatus(`minimap upload: ${JSON.stringify(r)}`)
+      reportStatus(`minimap upload result: ${JSON.stringify(r)}`)
     }
   } finally {
     buildingPage = false
