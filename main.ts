@@ -3,21 +3,24 @@ import {
   OsEventTypeList,
   CreateStartUpPageContainer,
   RebuildPageContainer,
+  ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
+  ImageContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { renderMapText } from './mapText'
+import { renderMapPixels } from './mapDraw'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
   buildEventContainer,
   buildBannerContainer,
-  buildMinimapTextContainer,
+  buildMinimapContainer,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
+  minimapDims,
   BANNER_MODES, BannerMode,
   NavState,
   CID,
@@ -383,24 +386,45 @@ async function reroute() {
   }
 }
 
-// ─── Text minimap content ─────────────────────────────────────────────────────
+// ─── Map image fetch ──────────────────────────────────────────────────────────
+//
+// Returns packed 4-bit greyscale bytes: 2 pixels per element, high nibble first.
+// This is the format required by ImageRawDataUpdate.imageData.
 
-// Character grid: 22 cols × 8 rows.
-// mpc (metres per character column) controls zoom; halved for close maneuvers.
-const MAP_COLS = 22
-const MAP_ROWS = 8
+async function fetchMinimap(): Promise<number[] | null> {
+  if (!settings.minimap.visible || (!currentLat && !currentLng)) return null
+  try {
+    const { w, h } = minimapDims(settings)
+    const distM = distToManeuverM()
+    const mpp   = distM < 400 ? 2 : distM < 1600 ? 4 : distM < 5000 ? 8 : 12
 
-function buildMinimapContent(): string {
-  if (!settings.minimap.visible) return ''
-  const distM = distToManeuverM()
-  const mpc   = distM < 400 ? 15 : distM < 1600 ? 30 : distM < 5000 ? 60 : 100
-  return renderMapText(currentLat, currentLng, steps, effectiveStepIdx(), MAP_COLS, MAP_ROWS, mpc)
+    let pixels = await renderMapPixels({
+      lat: currentLat, lng: currentLng,
+      steps, stepIdx: effectiveStepIdx(),
+      widthPx: w, heightPx: h,
+      metersPerPx: mpp,
+    })
+
+    // Apply brightness (settings 0–100 → scale 0.0–1.0)
+    const br = settings.minimap.brightness / 100
+    if (br < 1) pixels = pixels.map(v => Math.round(v * br))
+
+    // Pack: 2 pixels per byte, high nibble = left pixel, low nibble = right pixel
+    const packed: number[] = new Array(Math.ceil(pixels.length / 2))
+    for (let i = 0; i < packed.length; i++) {
+      packed[i] = ((pixels[i * 2] & 0xF) << 4) | ((pixels[i * 2 + 1] ?? 0) & 0xF)
+    }
+    return packed
+  } catch (e) {
+    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
+    return null
+  }
 }
 
 // ─── Full page build ──────────────────────────────────────────────────────────
 //
-// Called on first load, step change, settings change, or state change.
-// All containers are text — no image upload, no imageException possible.
+// Rebuilds all containers and uploads the minimap image.
+// mapBytes must already be packed (2 pixels per byte).
 
 async function buildPage() {
   if (buildingPage) {
@@ -409,29 +433,32 @@ async function buildPage() {
   }
   buildingPage = true
   try {
+    const mapBytes = await fetchMinimap()
+
     const esi       = effectiveStepIdx()
     const liveDistM = navState === 'navigating' && steps[esi]
       ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
       : undefined
     const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings)
-    const mapContent    = buildMinimapContent()
 
-    const containers: TextContainerProperty[] = [buildEventContainer()]
+    const textContainers: TextContainerProperty[] = [buildEventContainer()]
+    const imageContainers: ImageContainerProperty[] = []
 
     if (bannerMode !== 'always-off') {
-      containers.push(buildBannerContainer(bannerContent))
+      textContainers.push(buildBannerContainer(bannerContent))
     }
 
-    const mapContainer = buildMinimapTextContainer(mapContent, settings)
-    if (mapContainer) containers.push(mapContainer)
+    const mapContainer = buildMinimapContainer(settings)
+    if (mapContainer) imageContainers.push(mapContainer)
 
     const speedContainer = buildSpeedContainer(speedContent, settings)
-    if (speedContainer) containers.push(speedContainer)
+    if (speedContainer) textContainers.push(speedContainer)
 
     const containerData = {
-      containerTotalNum: containers.length,
-      textObject:        containers,
+      containerTotalNum: textContainers.length + imageContainers.length,
+      textObject:        textContainers,
+      imageObject:       imageContainers.length ? imageContainers : undefined,
     }
 
     if (!pageCreated) {
@@ -447,6 +474,15 @@ async function buildPage() {
         pageCreated = true
         reportStatus(`recreate: ${JSON.stringify(result)}`)
       }
+    }
+
+    if (mapContainer && mapBytes) {
+      const r = await bridge.updateImageRawData(new ImageRawDataUpdate({
+        containerID:   CID.MAP,
+        containerName: 'minimap',
+        imageData:     mapBytes,
+      }))
+      reportStatus(`minimap upload: ${JSON.stringify(r)}`)
     }
   } finally {
     buildingPage = false
@@ -485,15 +521,17 @@ async function refreshSpeed() {
 
 async function refreshMinimap() {
   if (!settings.minimap.visible) return
-  const content = buildMinimapContent()
-  if (!content) return
-  await bridge.textContainerUpgrade(new TextContainerUpgrade({
-    containerID:   CID.MAP,
-    containerName: 'minimap',
-    content,
-    contentOffset: 0,
-    contentLength: content.length,
-  }))
+  const mapBytes = await fetchMinimap()
+  if (!mapBytes) return
+  try {
+    await bridge.updateImageRawData(new ImageRawDataUpdate({
+      containerID:   CID.MAP,
+      containerName: 'minimap',
+      imageData:     mapBytes,
+    }))
+  } catch (e) {
+    reportStatus(`minimap refresh: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 // ─── GPS watch ────────────────────────────────────────────────────────────────

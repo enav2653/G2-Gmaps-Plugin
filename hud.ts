@@ -12,7 +12,7 @@
 // Container map:
 //   ID 1  — full-screen event-capture text (invisible, receives all input)
 //   ID 2  — banner text container          (top strip)
-//   ID 3  — minimap text container         (bottom-left, conditional)
+//   ID 3  — minimap image container        (bottom-left, conditional)
 //   ID 4  — speed text container           (bottom-right, conditional)
 //
 // The event-capture container sits behind everything. We use
@@ -20,6 +20,7 @@
 
 import {
   TextContainerProperty,
+  ImageContainerProperty,
 } from '@evenrealities/even_hub_sdk'
 
 import { RouteStep } from './maps'
@@ -35,8 +36,13 @@ const BANNER_H  = 64
 const BOTTOM_Y  = 196
 const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 
-// Minimap left padding in px
+// Base minimap dimensions (at 100% size)
+const MAP_BASE_W = 80
+const MAP_BASE_H = 88
+
+// Minimap padding in px
 const MAP_PAD_L = 4
+const MAP_PAD_B = 2
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
@@ -113,6 +119,17 @@ export function buildSpeedText(
   return `${spd}\n${unit}${limit}`
 }
 
+// ─── Minimap pixel dimensions (settings-adjusted) ─────────────────────────────
+
+export function minimapDims(settings: HudSettings): { w: number; h: number } {
+  const scale = settings.minimap.size / 100
+  // Clamp to SDK image container limits (20–288 w, 20–144 h)
+  // Width must be even for 4-bit packing (2 pixels per byte)
+  const w = Math.max(20, Math.min(288, Math.round(MAP_BASE_W * scale / 2) * 2))
+  const h = Math.max(20, Math.min(144, Math.round(MAP_BASE_H * scale)))
+  return { w, h }
+}
+
 // ─── Container builders ───────────────────────────────────────────────────────
 
 /** Full-screen invisible event-capture container. Always present. */
@@ -149,25 +166,18 @@ export function buildBannerContainer(content: string): TextContainerProperty {
   })
 }
 
-/** Minimap text container — bottom-left. Returns null if hidden or content is empty. */
-export function buildMinimapTextContainer(
-  content: string,
-  settings: HudSettings,
-): TextContainerProperty | null {
-  if (!settings.minimap.visible || !content) return null
+/** Minimap image container — bottom-left. Returns null if hidden. */
+export function buildMinimapContainer(settings: HudSettings): ImageContainerProperty | null {
+  if (!settings.minimap.visible) return null
 
-  return new TextContainerProperty({
+  const { w, h } = minimapDims(settings)
+  return new ImageContainerProperty({
     containerID:   CID.MAP,
     containerName: 'minimap',
     xPosition:     MAP_PAD_L,
-    yPosition:     BOTTOM_Y,
-    width:         200,
-    height:        BOTTOM_H,
-    borderWidth:   0,
-    borderColor:   0,
-    paddingLength: 2,
-    content,
-    isEventCapture: 0,
+    yPosition:     CANVAS_H - h - MAP_PAD_B,
+    width:         w,
+    height:        h,
   })
 }
 
