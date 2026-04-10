@@ -195,6 +195,18 @@ export async function renderMinimapPng(
   setPixel(posX + 1, posY + 1, 200); setPixel(posX - 1, posY + 1, 200)
   setPixel(posX + 1, posY - 1, 200); setPixel(posX - 1, posY - 1, 200)
 
+  // Corner brackets — L-shaped marks at all four corners.
+  // Ensures the PNG always has enough non-zero pixels to compress above the
+  // firmware's minimum size floor, regardless of route content.
+  const CL = 12  // arm length in pixels
+  const CV = 180 // brightness
+  for (let i = 0; i < CL; i++) {
+    setPixel(i,         0,         CV); setPixel(0,         i,         CV)  // top-left
+    setPixel(w - 1 - i, 0,         CV); setPixel(w - 1,     i,         CV)  // top-right
+    setPixel(i,         h - 1,     CV); setPixel(0,         h - 1 - i, CV)  // bottom-left
+    setPixel(w - 1 - i, h - 1,     CV); setPixel(w - 1,     h - 1 - i, CV)  // bottom-right
+  }
+
   const pngBytes = await encodeGreyscalePng(w, h, pixels)
   return Array.from(pngBytes)
 }
