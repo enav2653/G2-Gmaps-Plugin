@@ -524,12 +524,12 @@ async function refreshMinimap() {
       MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(), headingDeg,
       reportStatus,
     )
-    await bridge.updateImageRawData(new ImageRawDataUpdate({
+    const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,
       containerName: 'minimap',
       imageData:     pngData,
     }))
-    reportStatus(`minimap: sent ${pngData.length} bytes`)
+    reportStatus(`minimap: sent ${pngData.length} bytes, result=${JSON.stringify(imgResult)}`)
   } catch (e) {
     reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
@@ -812,6 +812,17 @@ async function init() {
       refreshMinimap()
     }
   })
+
+  // Probe GPS now so minimap has coordinates before the first buildPage.
+  // Also caches activeLocationProvider for the navigation poll loop.
+  try {
+    const loc = await tryBridgeLocation()
+    if (loc) {
+      currentLat = loc.lat
+      currentLng = loc.lng
+      reportStatus(`init GPS: ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`)
+    }
+  } catch { /* GPS probe failure is non-fatal */ }
 
   await buildPage()
 
