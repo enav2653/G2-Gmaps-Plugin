@@ -56,87 +56,6 @@ async function imageBlobToGreyscale8bit(blob: Blob, w: number, h: number): Promi
   return pixels
 }
 
-// ─── PNG encoder (uncompressed) ───────────────────────────────────────────────
-//
-// The G2 firmware validates imageData.length >= w * h before attempting to
-// decode the payload as a PNG.  A normally-compressed PNG for 90×120 is only
-// ~3 000 bytes which fails that check (imageSizeInvalid).  We use deflate
-// BTYPE=00 stored blocks (no compression) so the IDAT payload is the full
-// raw scanline data, giving a PNG size of ~10 988 bytes — safely above the
-// 10 800 threshold — while remaining a perfectly valid PNG file.
-
-function crc32(data: Uint8Array): number {
-  let crc = 0xffffffff
-  for (let i = 0; i < data.length; i++) {
-    crc ^= data[i]
-    for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
-  }
-  return (crc ^ 0xffffffff) >>> 0
-}
-
-function writeU32BE(arr: Uint8Array, off: number, v: number) {
-  arr[off] = (v>>>24)&0xff; arr[off+1] = (v>>>16)&0xff
-  arr[off+2] = (v>>>8)&0xff; arr[off+3] = v&0xff
-}
-
-function makePngChunk(type: string, data: Uint8Array): Uint8Array {
-  const chunk = new Uint8Array(4 + 4 + data.length + 4)
-  writeU32BE(chunk, 0, data.length)
-  for (let i = 0; i < 4; i++) chunk[4+i] = type.charCodeAt(i)
-  chunk.set(data, 8)
-  const crcData = new Uint8Array(4 + data.length)
-  for (let i = 0; i < 4; i++) crcData[i] = type.charCodeAt(i)
-  crcData.set(data, 4)
-  writeU32BE(chunk, 8 + data.length, crc32(crcData))
-  return chunk
-}
-
-/** Wrap raw bytes in a zlib stream using a single BTYPE=00 stored block. */
-function zlibStored(data: Uint8Array): Uint8Array {
-  const LEN = data.length
-  // 2 (zlib header) + 5 (stored block header) + LEN (data) + 4 (Adler-32)
-  const out = new Uint8Array(2 + 5 + LEN + 4)
-  let off = 0
-  // zlib header: CMF=0x78 (deflate, 32K window), FLG=0x01
-  // (0x78*256+0x01 = 30721, divisible by 31 ✓)
-  out[off++] = 0x78; out[off++] = 0x01
-  // Stored block: BFINAL=1, BTYPE=00
-  out[off++] = 0x01
-  out[off++] = LEN & 0xff;          out[off++] = (LEN >> 8) & 0xff   // LEN
-  out[off++] = (~LEN) & 0xff;       out[off++] = ((~LEN) >> 8) & 0xff // NLEN
-  out.set(data, off); off += LEN
-  // Adler-32 checksum (big-endian)
-  let s1 = 1, s2 = 0
-  for (let i = 0; i < LEN; i++) { s1 = (s1 + data[i]) % 65521; s2 = (s2 + s1) % 65521 }
-  out[off++] = (s2 >> 8) & 0xff; out[off++] = s2 & 0xff
-  out[off++] = (s1 >> 8) & 0xff; out[off++] = s1 & 0xff
-  return out
-}
-
-function encodeGreyscalePng(width: number, height: number, pixels: Uint8Array): Uint8Array {
-  const sig = new Uint8Array([137,80,78,71,13,10,26,10])
-  const ihdrData = new Uint8Array(13)
-  writeU32BE(ihdrData, 0, width); writeU32BE(ihdrData, 4, height)
-  ihdrData[8]=8; ihdrData[9]=0; ihdrData[10]=0; ihdrData[11]=0; ihdrData[12]=0
-  const ihdr = makePngChunk('IHDR', ihdrData)
-  // Build raw scanlines: 1 filter byte (0x00 = None) + width pixel bytes per row
-  const raw = new Uint8Array(height * (1 + width))
-  for (let y = 0; y < height; y++) {
-    raw[y*(1+width)] = 0
-    raw.set(pixels.subarray(y*width, (y+1)*width), y*(1+width)+1)
-  }
-  const idat = makePngChunk('IDAT', zlibStored(raw))
-  const iend = makePngChunk('IEND', new Uint8Array(0))
-  const png  = new Uint8Array(sig.length + ihdr.length + idat.length + iend.length)
-  let off = 0
-  png.set(sig,  off); off += sig.length
-  png.set(ihdr, off); off += ihdr.length
-  png.set(idat, off); off += idat.length
-  png.set(iend, off)
-  return png
-}
-
-
 //
 // Fetch a square map image large enough that, after rotating by headingDeg and
 // cropping to w×h, no black corners appear.  Diagonal = √(w²+h²).
@@ -295,9 +214,10 @@ export async function renderMinimapPng(
   for (let x = 0; x < w; x++) { setPixel(x, 0, 200); setPixel(x, h-1, 200) }
   for (let y = 0; y < h; y++) { setPixel(0, y, 200); setPixel(w-1, y, 200) }
 
-  // Encode as uncompressed PNG (BTYPE=00 stored blocks).
-  // Compressed PNG (~3 000 bytes) is rejected with imageSizeInvalid because
-  // the firmware validates data.length >= w*h before decoding.
-  // Uncompressed PNG is ~10 988 bytes, safely above that threshold.
-  return Array.from(encodeGreyscalePng(w, h, pixels))
+  // Convert 8-bit greyscale (0–255) to 4-bit values (0–15) for ImageRawDataUpdate
+  const gray4 = new Array<number>(w * h)
+  for (let i = 0; i < w * h; i++) {
+    gray4[i] = Math.max(0, Math.min(15, Math.round(pixels[i] / 255 * 15)))
+  }
+  return gray4
 }
