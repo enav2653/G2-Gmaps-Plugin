@@ -47,8 +47,9 @@ let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
 let watchId:    number | null = null
-let pageCreated  = false
-let buildingPage = false  // serialises concurrent buildPage calls
+let pageCreated     = false
+let buildingPage    = false  // serialises concurrent buildPage calls
+let buildPagePending = false  // a call arrived while buildingPage was true
 
 // Cached reference to whichever Android/bridge location method worked
 let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number } | null>) | null = null
@@ -401,12 +402,16 @@ function effectiveStepIdx(): number {
   return previewStepIdx ?? stepIdx
 }
 
-/** Advance past any step whose endpoint we've entered (150 m threshold). */
+/** Advance past any step whose endpoint we've entered.
+ *  Threshold scales with speed to keep roughly 15 s of lookahead:
+ *    20 mph → ~134 m   40 mph → ~268 m   60 mph → ~402 m
+ *  Minimum 120 m so the step still advances promptly when nearly stopped. */
 function advanceStep(lat: number, lng: number): number {
+  const threshold = Math.max(120, speedMph * 6.7)  // 6.7 ≈ 15 s × 0.447 (mph→m/s)
   for (let i = stepIdx; i < steps.length - 1; i++) {
     const s = steps[i]
     if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
-    if (haversine(lat, lng, s.endLat, s.endLng) < 150) return i + 1
+    if (haversine(lat, lng, s.endLat, s.endLng) < threshold) return i + 1
   }
   return stepIdx
 }
@@ -452,10 +457,12 @@ function minimapZoom(): number {
 
 async function buildPage() {
   if (buildingPage) {
-    reportStatus('buildPage: queued (dropping duplicate)')
+    buildPagePending = true   // will re-run with latest state once current build finishes
     return
   }
-  buildingPage = true
+  do {
+    buildPagePending = false
+    buildingPage = true
   try {
     const esi       = effectiveStepIdx()
     const liveDistM = navState === 'navigating' && steps[esi]
@@ -501,6 +508,7 @@ async function buildPage() {
   } finally {
     buildingPage = false
   }
+  } while (buildPagePending)
 }
 
 // ─── In-place banner update (fast, no flicker) ────────────────────────────────

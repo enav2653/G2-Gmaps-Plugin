@@ -192,6 +192,25 @@ function renderPixels(
       const [px1, py1] = toPixel(pts[j + 1][0], pts[j + 1][1])
       drawLine(px0, py0, px1, py1, v, thick)
     }
+
+    // Close any pixel gap at the junction between this step and the next.
+    // Google's polylines share the endpoint in theory but rounding to pixels
+    // can leave a 1-px break.  Use the dimmer of the two adjacent brightnesses
+    // so the join doesn't flash brighter than either segment.
+    if (i + 1 < steps.length && pts.length > 0) {
+      const ns = steps[i + 1]
+      const np: Array<[number, number]> = ns.polylinePoints.length >= 2
+        ? ns.polylinePoints
+        : (ns.startLat || ns.startLng) && (ns.endLat || ns.endLng)
+          ? [[ns.startLat, ns.startLng], [ns.endLat, ns.endLng]]
+          : []
+      if (np.length > 0) {
+        const nv  = i + 1 < stepIdx ? 50 : i + 1 === stepIdx ? 240 : 130
+        const [px0, py0] = toPixel(pts[pts.length - 1][0], pts[pts.length - 1][1])
+        const [px1, py1] = toPixel(np[0][0], np[0][1])
+        drawLine(px0, py0, px1, py1, Math.min(v, nv), false)
+      }
+    }
   }
 
   // ── Next turn marker — small cross at end of current step ─────────────────────
