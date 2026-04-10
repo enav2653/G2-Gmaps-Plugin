@@ -39,8 +39,8 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 4
 
-// Minimap image dimensions — 200x92 is the firmware's practical maximum
-export const MINIMAP_IMG_W = 200
+// Minimap image dimensions
+export const MINIMAP_IMG_W = 92
 export const MINIMAP_IMG_H = BOTTOM_H   // 92
 const MINIMAP_Y = BOTTOM_Y              // 196
 
