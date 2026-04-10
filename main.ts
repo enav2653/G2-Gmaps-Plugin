@@ -391,12 +391,12 @@ function effectiveStepIdx(): number {
   return previewStepIdx ?? stepIdx
 }
 
-/** Advance past any step whose endpoint we've entered (80 m threshold). */
+/** Advance past any step whose endpoint we've entered (150 m threshold). */
 function advanceStep(lat: number, lng: number): number {
   for (let i = stepIdx; i < steps.length - 1; i++) {
     const s = steps[i]
     if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
-    if (haversine(lat, lng, s.endLat, s.endLng) < 80) return i + 1
+    if (haversine(lat, lng, s.endLat, s.endLng) < 150) return i + 1
   }
   return stepIdx
 }
@@ -483,6 +483,10 @@ async function buildPage() {
         reportStatus(`recreate: ${JSON.stringify(result)}`)
       }
     }
+
+    // Image containers are empty after every create/rebuild — repopulate immediately
+    // rather than waiting for the next position poll (which would leave a blank gap).
+    refreshMinimap().catch(() => {})
 
   } finally {
     buildingPage = false
