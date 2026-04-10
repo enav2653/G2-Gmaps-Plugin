@@ -1,12 +1,12 @@
-display.js
-dist/
-g2-maps.ehpk
-hud.js
-main.js
-mapImage.js
-maps.js
-node_modules/
-package-lock.json
-settings.js
-speedLimit.js
-vite.config.js
+        display.js
+        dist/
+        g2-maps.ehpk
+        hud.js
+        main.js
+        mapImage.js
+        maps.js
+        node_modules/
+        package-lock.json
+        settings.js
+        speedLimit.js
+        vite.config.js
