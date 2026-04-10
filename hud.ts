@@ -39,10 +39,10 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 0
 
-// Minimap image dimensions — SDK max (288×144), always landscape, fill=0 for unused area
+// Minimap image dimensions — max width, bottom-strip height, stays at y=196
 export const MINIMAP_IMG_W = 288
-export const MINIMAP_IMG_H = 144
-const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 144
+export const MINIMAP_IMG_H = BOTTOM_H   // 92
+const MINIMAP_Y = BOTTOM_Y              // 196
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
