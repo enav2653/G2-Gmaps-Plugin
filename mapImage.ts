@@ -216,11 +216,9 @@ export async function renderMinimapPng(
   for (let x = 0; x < w; x++) { setPixel(x, 0, 200); setPixel(x, h-1, 200) }
   for (let y = 0; y < h; y++) { setPixel(0, y, 200); setPixel(w-1, y, 200) }
 
-  // Return one 4-bit value (0–15) per pixel as number[].
-  // The G2 SDK expects imageData.length == w * h with each entry in [0, 15].
-  const out = new Array<number>(w * h)
-  for (let i = 0; i < w * h; i++) {
-    out[i] = Math.min(15, Math.round(pixels[i] / 255 * 15))
-  }
-  return out
+  // Return one 8-bit value (0–255) per pixel as number[].
+  // The G2 firmware scales to 4-bit internally (value >> 4). Sending
+  // pre-scaled 0–15 values causes all pixels to map to 0 after the
+  // firmware shift, producing a blank image and triggering imageException.
+  return Array.from(pixels)
 }
