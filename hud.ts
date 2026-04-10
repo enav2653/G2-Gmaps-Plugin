@@ -39,10 +39,10 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 0
 
-// Minimap image dimensions — SDK max width × demo-documented height
-export const MINIMAP_IMG_W = 288
-export const MINIMAP_IMG_H = 136
-const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 152
+// Minimap image dimensions — firmware hard cap is 200×92
+export const MINIMAP_IMG_W = 200
+export const MINIMAP_IMG_H = BOTTOM_H   // 92
+const MINIMAP_Y = BOTTOM_Y              // 196
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8

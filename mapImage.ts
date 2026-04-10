@@ -120,16 +120,6 @@ export async function renderMinimapPng(
   const cy = h / 2
 
   const pixels = new Uint8Array(w * h).fill(0)
-  // Scatter pseudo-random values 1–3 across every 8th pixel.
-  // Values ≤ 3 map to grey-level 0 on the 4-bit display (visually
-  // identical to black), but the irregular pattern prevents deflate from
-  // compressing the image to near-zero, keeping it above the firmware's
-  // minimum PNG byte-count floor.
-  let lcg = 0x12345678
-  for (let i = 0; i < pixels.length; i += 8) {
-    lcg = (Math.imul(lcg, 1664525) + 1013904223) >>> 0
-    pixels[i] = (lcg >>> 30) + 1  // 1, 2, or 3
-  }
 
   function toPixel(plat: number, plng: number): [number, number] {
     const px = cx + (plng - lng) * cosLat * METERS_PER_DEG / mpp
