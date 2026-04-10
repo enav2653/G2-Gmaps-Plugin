@@ -54,11 +54,10 @@ let androidPollTimer: ReturnType<typeof setInterval> | null = null
 let previewStepIdx:   number | null = null
 let previewResetTimer: ReturnType<typeof setTimeout> | null = null
 
-// Speed and heading from consecutive position fixes
+// Speed calculation from consecutive position fixes
 let prevPollLat  = 0
 let prevPollLng  = 0
 let prevPollTime = 0
-let headingDeg   = 0   // degrees clockwise from north, smoothed EMA
 
 // Reroute guard
 let rerouteInProgress = false
@@ -225,11 +224,6 @@ async function pollLocation() {
       const sample = distM / dtSec * 2.23694
       if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
     }
-    // Heading — only update when we've moved enough to get a reliable bearing
-    if (distM > 5) {
-      const bearing = gpsHeading(prevPollLat, prevPollLng, loc.lat, loc.lng)
-      headingDeg = headingDeg * 0.6 + bearing * 0.4   // smooth EMA
-    }
   }
   prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
 
@@ -324,16 +318,6 @@ async function changeStep(newIdx: number) {
 }
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
-
-/** Bearing in degrees clockwise from north, from point 1 → point 2. */
-function gpsHeading(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const φ1 = lat1 * Math.PI / 180
-  const φ2 = lat2 * Math.PI / 180
-  const Δλ = (lng2 - lng1) * Math.PI / 180
-  const y = Math.sin(Δλ) * Math.cos(φ2)
-  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
-}
 
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R    = 6371000
@@ -464,8 +448,6 @@ async function buildPage() {
       }
     }
 
-    // Populate image container right after page create/rebuild
-    refreshMinimap()
   } finally {
     buildingPage = false
   }
@@ -502,36 +484,23 @@ async function refreshSpeed() {
 }
 
 async function refreshMinimap() {
-  if (!settings.minimap.visible) {
-    reportStatus('minimap: hidden in settings')
-    return
-  }
-  if (!pageCreated) {
-    reportStatus('minimap: page not yet created')
-    return
-  }
-  if (!currentLat && !currentLng) {
-    reportStatus('minimap: no GPS fix yet')
-    return
-  }
-  if (minimapRefreshing) return   // silent skip when busy
+  if (!settings.minimap.visible || !pageCreated) return
+  if (!currentLat && !currentLng) return
+  if (minimapRefreshing) return
 
   minimapRefreshing = true
-  reportStatus(`minimap: rendering (heading=${headingDeg.toFixed(0)}°)`)
   try {
     const pngData = await renderMinimapPng(
       currentLat, currentLng, steps, effectiveStepIdx(),
-      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(), headingDeg,
-      reportStatus,
+      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
     )
-    const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
+    await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,
       containerName: 'minimap',
       imageData:     pngData,
     }))
-    reportStatus(`minimap: sent ${pngData.length} bytes, result=${JSON.stringify(imgResult)}`)
   } catch (e) {
-    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
+    reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
     minimapRefreshing = false
   }
@@ -812,17 +781,6 @@ async function init() {
       refreshMinimap()
     }
   })
-
-  // Probe GPS now so minimap has coordinates before the first buildPage.
-  // Also caches activeLocationProvider for the navigation poll loop.
-  try {
-    const loc = await tryBridgeLocation()
-    if (loc) {
-      currentLat = loc.lat
-      currentLng = loc.lng
-      reportStatus(`init GPS: ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`)
-    }
-  } catch { /* GPS probe failure is non-fatal */ }
 
   await buildPage()
 

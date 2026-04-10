@@ -1,15 +1,100 @@
-// ─── mapImage.ts ─────────────────────────────────────────────────────────────
+// ─── PNG encoder ─────────────────────────────────────────────────────────────
+// Matches visionote's approach: full 8-bit greyscale PNG passed to
+// updateImageRawData, not raw pixel values.
+
+function crc32(data: Uint8Array): number {
+  let crc = 0xffffffff
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i]
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function writeU32BE(arr: Uint8Array, offset: number, value: number): void {
+  arr[offset]     = (value >>> 24) & 0xff
+  arr[offset + 1] = (value >>> 16) & 0xff
+  arr[offset + 2] = (value >>> 8)  & 0xff
+  arr[offset + 3] = value & 0xff
+}
+
+function makePngChunk(type: string, data: Uint8Array): Uint8Array {
+  const chunk = new Uint8Array(4 + 4 + data.length + 4)
+  writeU32BE(chunk, 0, data.length)
+  for (let i = 0; i < 4; i++) chunk[4 + i] = type.charCodeAt(i)
+  chunk.set(data, 8)
+  const crcData = new Uint8Array(4 + data.length)
+  for (let i = 0; i < 4; i++) crcData[i] = type.charCodeAt(i)
+  crcData.set(data, 4)
+  writeU32BE(chunk, 8 + data.length, crc32(crcData))
+  return chunk
+}
+
+async function zlibCompress(data: Uint8Array): Promise<Uint8Array> {
+  const cs = new CompressionStream('deflate')
+  const writer = cs.writable.getWriter()
+  writer.write(data as unknown as BufferSource)
+  writer.close()
+  const reader = cs.readable.getReader()
+  const chunks: Uint8Array[] = []
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+  let total = 0
+  for (const c of chunks) total += c.length
+  const result = new Uint8Array(total)
+  let off = 0
+  for (const c of chunks) { result.set(c, off); off += c.length }
+  return result
+}
+
+async function encodeGreyscalePng(width: number, height: number, pixels: Uint8Array): Promise<Uint8Array> {
+  const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+
+  const ihdrData = new Uint8Array(13)
+  writeU32BE(ihdrData, 0, width)
+  writeU32BE(ihdrData, 4, height)
+  ihdrData[8]  = 8  // bit depth
+  ihdrData[9]  = 0  // color type: greyscale
+  ihdrData[10] = 0  // compression
+  ihdrData[11] = 0  // filter
+  ihdrData[12] = 0  // interlace
+  const ihdr = makePngChunk('IHDR', ihdrData)
+
+  // Each row: filter byte 0x00 (None) + pixel data
+  const rawData = new Uint8Array(height * (1 + width))
+  for (let y = 0; y < height; y++) {
+    rawData[y * (1 + width)] = 0
+    rawData.set(pixels.subarray(y * width, (y + 1) * width), y * (1 + width) + 1)
+  }
+  const compressed = await zlibCompress(rawData)
+  const idat = makePngChunk('IDAT', compressed)
+  const iend = makePngChunk('IEND', new Uint8Array(0))
+
+  const png = new Uint8Array(signature.length + ihdr.length + idat.length + iend.length)
+  let off = 0
+  png.set(signature, off); off += signature.length
+  png.set(ihdr,      off); off += ihdr.length
+  png.set(idat,      off); off += idat.length
+  png.set(iend,      off)
+  return png
+}
+
+// ─── Vector minimap renderer ──────────────────────────────────────────────────
 //
-// Renders the minimap using canvas 2D drawing (no raster image download).
+// Pure pixel-math renderer — no canvas, no API calls.
+// Draws the route as bright lines on a dark background.
 //
-// Pipeline:
-//   1. Draw black background on an off-screen canvas.
-//   2. Project lat/lng → pixel using flat Mercator (zoom-based scale).
-//   3. Draw past/current/future route steps in graduated brightness.
-//   4. Draw position marker and turn marker.
-//   5. Return number[] of 4-bit greyscale values (0–15) for ImageRawDataUpdate.
-//
-// This matches the approach used in the working v0.2.30 build.
+// Brightness levels:
+//   20  — background
+//   50  — past steps (already driven)
+//   130 — upcoming steps
+//   240 — current step (thick)
+//   255 — position marker / turn point
 
 interface StepCoords {
   polylinePoints: Array<[number, number]>
@@ -27,95 +112,90 @@ export async function renderMinimapPng(
   w: number,
   h: number,
   zoom: number,
-  headingDeg = 0,
-  log?: (msg: string) => void,
 ): Promise<number[]> {
-  const canvas = document.createElement('canvas')
-  canvas.width  = w
-  canvas.height = h
-  canvas.style.cssText = 'position:absolute;left:-9999px;top:-9999px;'
-  document.body.appendChild(canvas)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    document.body.removeChild(canvas)
-    log?.('minimap: canvas 2d unavailable')
-    return new Array<number>(w * h).fill(0)
-  }
-
-  // Black background
-  ctx.fillStyle = '#000'
-  ctx.fillRect(0, 0, w, h)
-
-  // Flat Mercator scale: metres per pixel at this zoom and latitude
-  const cosLat = Math.cos(lat * Math.PI / 180)
-  const mpp    = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
   const METERS_PER_DEG = 111_320
-  const cx = w / 2, cy = h / 2
+  const cosLat = Math.cos(lat * Math.PI / 180)
+  // metres per pixel at this zoom level and latitude
+  const mpp = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
+  const cx = w / 2
+  const cy = h / 2
 
-  function toXY(plat: number, plng: number): [number, number] {
-    const em = (plng - lng) * cosLat * METERS_PER_DEG  // east metres
-    const nm = (plat - lat) * METERS_PER_DEG            // north metres
-    return [cx + em / mpp, cy - nm / mpp]
+  const pixels = new Uint8Array(w * h).fill(20)
+
+  function toPixel(plat: number, plng: number): [number, number] {
+    const px = cx + (plng - lng) * cosLat * METERS_PER_DEG / mpp
+    const py = cy - (plat - lat) * METERS_PER_DEG / mpp
+    return [Math.round(px), Math.round(py)]
   }
 
-  function grey(v: number): string {
-    const c = Math.round(Math.max(0, Math.min(255, v)))
-    return `rgb(${c},${c},${c})`
+  function setPixel(x: number, y: number, v: number) {
+    if (x >= 0 && x < w && y >= 0 && y < h) {
+      if (v > pixels[y * w + x]) pixels[y * w + x] = v
+    }
+  }
+
+  // Bresenham line — draws extra pixel for thick lines (current step)
+  function drawLine(x0: number, y0: number, x1: number, y1: number, v: number, thick: boolean) {
+    const dx = Math.abs(x1 - x0)
+    const dy = Math.abs(y1 - y0)
+    const sx = x0 < x1 ? 1 : -1
+    const sy = y0 < y1 ? 1 : -1
+    let err = dx - dy
+    for (;;) {
+      setPixel(x0, y0, v)
+      if (thick) {
+        // Thicken perpendicular to dominant direction
+        if (dx >= dy) { setPixel(x0, y0 + 1, v); setPixel(x0, y0 - 1, v) }
+        else          { setPixel(x0 + 1, y0, v); setPixel(x0 - 1, y0, v) }
+      }
+      if (x0 === x1 && y0 === y1) break
+      const e2 = 2 * err
+      if (e2 > -dy) { err -= dy; x0 += sx }
+      if (e2 <  dx) { err += dx; y0 += sy }
+    }
   }
 
   // Draw route segments
   for (let i = 0; i < steps.length; i++) {
-    const s       = steps[i]
+    const s = steps[i]
+    const past    = i < stepIdx
     const current = i === stepIdx
-    const v       = i < stepIdx ? 50 : current ? 240 : 160
+    const v       = past ? 50 : current ? 240 : 130
+    const thick   = current
 
+    // Use decoded polyline if available, else fall back to start→end straight line
     const pts: Array<[number, number]> = s.polylinePoints.length >= 2
       ? s.polylinePoints
       : (s.startLat || s.startLng) && (s.endLat || s.endLng)
         ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
         : []
 
-    if (pts.length < 2) continue
-
-    ctx.strokeStyle = grey(v)
-    ctx.lineWidth   = current ? 3 : 2
-    ctx.lineCap     = 'round'
-    ctx.lineJoin    = 'round'
-    ctx.beginPath()
-    const [x0, y0] = toXY(pts[0][0], pts[0][1])
-    ctx.moveTo(x0, y0)
-    for (let j = 1; j < pts.length; j++) {
-      const [x, y] = toXY(pts[j][0], pts[j][1])
-      ctx.lineTo(x, y)
+    for (let j = 0; j < pts.length - 1; j++) {
+      const [px0, py0] = toPixel(pts[j][0],     pts[j][1])
+      const [px1, py1] = toPixel(pts[j + 1][0], pts[j + 1][1])
+      drawLine(px0, py0, px1, py1, v, thick)
     }
-    ctx.stroke()
   }
 
-  // Next turn marker — 3×3 white square at end of current step
+  // Next turn marker — small cross at end of current step
   if (stepIdx < steps.length) {
     const s = steps[stepIdx]
     if (s.endLat || s.endLng) {
-      const [tx, ty] = toXY(s.endLat, s.endLng)
-      ctx.fillStyle = '#fff'
-      ctx.fillRect(Math.round(tx) - 1, Math.round(ty) - 1, 3, 3)
+      const [tx, ty] = toPixel(s.endLat, s.endLng)
+      setPixel(tx,     ty,     255)
+      setPixel(tx + 1, ty,     200); setPixel(tx - 1, ty,     200)
+      setPixel(tx,     ty + 1, 200); setPixel(tx,     ty - 1, 200)
     }
   }
 
-  // Position marker — white circle with dark outline
-  const [posX, posY] = toXY(lat, lng)
-  ctx.fillStyle = '#000'
-  ctx.beginPath(); ctx.arc(posX, posY, 4, 0, Math.PI * 2); ctx.fill()
-  ctx.fillStyle = '#fff'
-  ctx.beginPath(); ctx.arc(posX, posY, 3, 0, Math.PI * 2); ctx.fill()
+  // Position marker — filled diamond at current position
+  const [posX, posY] = toPixel(lat, lng)
+  setPixel(posX,     posY,     255)
+  setPixel(posX + 1, posY,     255); setPixel(posX - 1, posY,     255)
+  setPixel(posX,     posY + 1, 255); setPixel(posX,     posY - 1, 255)
+  setPixel(posX + 1, posY + 1, 200); setPixel(posX - 1, posY + 1, 200)
+  setPixel(posX + 1, posY - 1, 200); setPixel(posX - 1, posY - 1, 200)
 
-  // Extract pixels and convert to 4-bit greyscale (0–15)
-  const { data } = ctx.getImageData(0, 0, w, h)
-  document.body.removeChild(canvas)
-
-  const out: number[] = new Array(w * h)
-  for (let i = 0; i < w * h; i++) {
-    const luma = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
-    out[i] = Math.max(0, Math.min(15, Math.round(luma / 255 * 15)))
-  }
-  return out
+  const pngBytes = await encodeGreyscalePng(w, h, pixels)
+  return Array.from(pngBytes)
 }
