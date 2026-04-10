@@ -37,12 +37,12 @@ const BOTTOM_Y  = 196
 const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 
 // Minimap left padding in px
-const MAP_PAD_L = 4
+const MAP_PAD_L = 0
 
-// Minimap image dimensions
-export const MINIMAP_IMG_W = 200
-export const MINIMAP_IMG_H = 200
-const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 88
+// Minimap image dimensions — documented spec from Even Realities demo app
+export const MINIMAP_IMG_W = 576
+export const MINIMAP_IMG_H = 136
+const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 152
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
