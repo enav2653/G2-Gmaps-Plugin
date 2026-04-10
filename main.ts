@@ -13,6 +13,7 @@ import { getRoute, RouteStep } from './maps'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import { renderMinimapBmpTiles } from './mapImage'
+import { getCachedRoads, refreshRoads } from './roadData'
 import {
   buildEventContainer,
   buildBannerContainer,
@@ -493,9 +494,13 @@ async function refreshMinimap() {
 
   minimapRefreshing = true
   try {
+    // Kick off a background road-data refresh (non-blocking; uses cached data this frame)
+    refreshRoads(currentLat, currentLng, minimapZoom(), MINIMAP_IMG_W, MINIMAP_IMG_H).catch(() => {})
+
     const tiles = renderMinimapBmpTiles(
       currentLat, currentLng, steps, effectiveStepIdx(),
       MINIMAP_IMG_W, MINIMAP_IMG_H, MINIMAP_TILE_W, MINIMAP_TILE_H, minimapZoom(),
+      getCachedRoads(),
     )
     const results = await Promise.all(tiles.map((tileData, i) =>
       bridge.updateImageRawData(new ImageRawDataUpdate({
@@ -504,7 +509,7 @@ async function refreshMinimap() {
         imageData:     tileData,
       }))
     ))
-    reportStatus(`minimap: ${tiles[0].length}B×4 → ${JSON.stringify(results)}`)
+    reportStatus(`minimap: ${tiles[0].length}B×${tiles.length} → ${JSON.stringify(results)}`)
   } catch (e) {
     reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {

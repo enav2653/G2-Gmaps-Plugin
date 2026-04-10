@@ -59,18 +59,32 @@ function encodeGreyscale4BitBmp(width: number, height: number, pixels: Uint8Arra
   return bmp
 }
 
+// ─── 5×5 bitmap glyphs for compass labels ────────────────────────────────────
+//
+// Each entry is 5 rows; each row is a 5-bit mask (MSB = left pixel).
+
+const COMPASS_GLYPHS: Record<string, number[]> = {
+  N: [0b10001, 0b11001, 0b10101, 0b10011, 0b10001],
+  S: [0b01110, 0b10000, 0b01110, 0b00001, 0b01110],
+  E: [0b11111, 0b10000, 0b11100, 0b10000, 0b11111],
+  W: [0b10001, 0b10001, 0b10101, 0b11011, 0b10001],
+}
+const GLYPH_W = 5
+const GLYPH_H = 5
+
 // ─── Vector minimap renderer ──────────────────────────────────────────────────
 //
 // Pure pixel-math renderer — no canvas, no API calls.
-// Draws the route as bright lines on a dark background.
 //
 // Brightness levels (8-bit, mapped to 4-bit index = value >> 4):
 //    0  — background (index 0 = black)
-//   50  — past steps  (index 3)
+//   30  — background roads
+//   50  — past steps   (index 3)
 //  130  — upcoming steps (index 8)
+//  180  — corner brackets / compass labels (index 11)
+//  200  — turn marker / compass (index 12)
 //  240  — current step / thick (index 15)
-//  255  — position marker / turn point (index 15)
-//  180  — corner brackets (index 11)
+//  255  — position marker (index 15)
 
 interface StepCoords {
   polylinePoints: Array<[number, number]>
@@ -88,6 +102,7 @@ function renderPixels(
   w: number,
   h: number,
   zoom: number,
+  roads: Array<Array<[number, number]>> = [],
 ): Uint8Array {
   const METERS_PER_DEG = 111_320
   const cosLat = Math.cos(lat * Math.PI / 180)
@@ -129,7 +144,27 @@ function renderPixels(
     }
   }
 
-  // Draw route segments
+  // Draw a 5×5 glyph at pixel position (x0, y0)
+  function drawGlyph(key: string, x0: number, y0: number, v: number) {
+    const rows = COMPASS_GLYPHS[key]
+    if (!rows) return
+    for (let row = 0; row < GLYPH_H; row++) {
+      for (let col = 0; col < GLYPH_W; col++) {
+        if (rows[row] & (1 << (GLYPH_W - 1 - col))) setPixel(x0 + col, y0 + row, v)
+      }
+    }
+  }
+
+  // ── Background roads (from OSM Overpass) ─────────────────────────────────────
+  for (const road of roads) {
+    for (let j = 0; j < road.length - 1; j++) {
+      const [px0, py0] = toPixel(road[j][0],     road[j][1])
+      const [px1, py1] = toPixel(road[j + 1][0], road[j + 1][1])
+      drawLine(px0, py0, px1, py1, 30, false)
+    }
+  }
+
+  // ── Route segments ────────────────────────────────────────────────────────────
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i]
     const past    = i < stepIdx
@@ -150,7 +185,7 @@ function renderPixels(
     }
   }
 
-  // Next turn marker — small cross at end of current step
+  // ── Next turn marker — small cross at end of current step ─────────────────────
   if (stepIdx < steps.length) {
     const s = steps[stepIdx]
     if (s.endLat || s.endLng) {
@@ -161,7 +196,7 @@ function renderPixels(
     }
   }
 
-  // Position marker — filled diamond at current position
+  // ── Position marker — filled diamond at current position ──────────────────────
   const [posX, posY] = toPixel(lat, lng)
   setPixel(posX,     posY,     255)
   setPixel(posX + 1, posY,     255); setPixel(posX - 1, posY,     255)
@@ -169,7 +204,7 @@ function renderPixels(
   setPixel(posX + 1, posY + 1, 200); setPixel(posX - 1, posY + 1, 200)
   setPixel(posX + 1, posY - 1, 200); setPixel(posX - 1, posY - 1, 200)
 
-  // Corner brackets — L-shaped marks matching the Even Realities nav app style
+  // ── Corner brackets ───────────────────────────────────────────────────────────
   const CL = 12  // arm length in pixels
   const CV = 180 // brightness
   for (let i = 0; i < CL; i++) {
@@ -179,21 +214,40 @@ function renderPixels(
     setPixel(w - 1 - i, h - 1,     CV); setPixel(w - 1,     h - 1 - i, CV)  // bottom-right
   }
 
+  // ── Compass labels — N/S/E/W placed on the largest inscribed circle ───────────
+  //
+  // The circle has radius r = min(w,h)/2. Each glyph (5×5) is positioned so
+  // its outermost edge (the face furthest from centre) touches the circle.
+  {
+    const r  = Math.min(w, h) / 2
+    const gc = 200  // glyph brightness
+    // N — top edge of glyph at y = cy − r
+    drawGlyph('N', Math.round(cx - GLYPH_W / 2), Math.round(cy - r),                  gc)
+    // S — bottom edge of glyph at y = cy + r − 1
+    drawGlyph('S', Math.round(cx - GLYPH_W / 2), Math.round(cy + r) - GLYPH_H,        gc)
+    // E — right edge of glyph at x = cx + r − 1
+    drawGlyph('E', Math.round(cx + r) - GLYPH_W, Math.round(cy - GLYPH_H / 2),        gc)
+    // W — left edge of glyph at x = cx − r
+    drawGlyph('W', Math.round(cx - r),            Math.round(cy - GLYPH_H / 2),        gc)
+  }
+
   return pixels
 }
 
 export function renderMinimapBmp(
   lat: number, lng: number, steps: StepCoords[], stepIdx: number,
   w: number, h: number, zoom: number,
+  roads: Array<Array<[number, number]>> = [],
 ): number[] {
-  return Array.from(encodeGreyscale4BitBmp(w, h, renderPixels(lat, lng, steps, stepIdx, w, h, zoom)))
+  return Array.from(encodeGreyscale4BitBmp(w, h, renderPixels(lat, lng, steps, stepIdx, w, h, zoom, roads)))
 }
 
 export function renderMinimapBmpTiles(
   lat: number, lng: number, steps: StepCoords[], stepIdx: number,
   totalW: number, totalH: number, tileW: number, tileH: number, zoom: number,
+  roads: Array<Array<[number, number]>> = [],
 ): number[][] {
-  const pixels = renderPixels(lat, lng, steps, stepIdx, totalW, totalH, zoom)
+  const pixels = renderPixels(lat, lng, steps, stepIdx, totalW, totalH, zoom, roads)
   const cols = totalW / tileW
   const rows = totalH / tileH
   const tiles: number[][] = []
