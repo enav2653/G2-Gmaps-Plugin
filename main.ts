@@ -66,6 +66,9 @@ let prevPollTime = 0
 // Heading — GPS bearing (when moving) or device compass (when slow/stationary)
 let gpsHeadingDeg:    number | null = null
 let deviceHeadingDeg: number | null = null
+// Circular EMA state for compass smoothing (sin/cos components, initialised north)
+let deviceHeadingSin = 0
+let deviceHeadingCos = 1
 
 // Reroute guard
 let rerouteInProgress = false
@@ -612,8 +615,16 @@ function stopGPS() {
 // Used as fallback when GPS speed is too low for a reliable bearing.
 
 function startCompass() {
+  // Circular EMA: smooth sin + cos independently, recover angle with atan2.
+  // This handles the 0°/360° wrap correctly (e.g. 350° + 10° → 0°, not 180°).
+  // alpha=0.1 → ~10-frame lag at typical 10 Hz sensor rate — smooth but responsive.
+  const ALPHA = 0.1
   const onOrientation = (e: DeviceOrientationEvent) => {
-    if (e.alpha !== null) deviceHeadingDeg = e.alpha
+    if (e.alpha === null) return
+    const rad = e.alpha * Math.PI / 180
+    deviceHeadingSin = ALPHA * Math.sin(rad) + (1 - ALPHA) * deviceHeadingSin
+    deviceHeadingCos = ALPHA * Math.cos(rad) + (1 - ALPHA) * deviceHeadingCos
+    deviceHeadingDeg = ((Math.atan2(deviceHeadingSin, deviceHeadingCos) * 180 / Math.PI) + 360) % 360
   }
   // deviceorientationabsolute is always compass-referenced on Android
   window.addEventListener('deviceorientationabsolute', onOrientation as EventListener, true)
