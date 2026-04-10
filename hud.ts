@@ -12,7 +12,7 @@
 // Container map:
 //   ID 1  — full-screen event-capture text (invisible, receives all input)
 //   ID 2  — banner text container          (top strip)
-//   ID 3  — minimap image container        (bottom-left, conditional)
+//   ID 3  — minimap text container         (bottom-left, conditional)
 //   ID 4  — speed text container           (bottom-right, conditional)
 //
 // The event-capture container sits behind everything. We use
@@ -36,13 +36,14 @@ const BANNER_H  = 64
 const BOTTOM_Y  = 196
 const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 
-// Base minimap dimensions (at 100% size)
-const MAP_BASE_W = 80
-const MAP_BASE_H = 88
-
-// Minimap left/bottom padding in px
+// Minimap left padding in px
 const MAP_PAD_L = 4
-const MAP_PAD_B = 2
+
+// Minimap image dimensions — 3:4 portrait ratio, anchored to bottom-left
+// The top edge sits at y=168, extending into the otherwise-empty clear zone.
+export const MINIMAP_IMG_W = 90
+export const MINIMAP_IMG_H = 120
+const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H   // 168
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
@@ -78,6 +79,7 @@ export function buildBannerText(
   stepIdx: number,
   state: NavState,
   bannerMode: BannerMode,
+  liveDistM?: number,
 ): string {
   if (state === 'idle')    return 'G2 Maps  •  Set a destination'
   if (state === 'passive') return 'Passive map  •  No active route'
@@ -87,7 +89,7 @@ export function buildBannerText(
   if (!step) return 'Finding location…'
 
   const instr = formatInstruction(step.instruction)
-  const dist  = formatDistance(step.distanceMeters)
+  const dist  = formatDistance(liveDistM ?? step.distanceMeters)
   const eta   = formatETA(steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0))
 
   // Mode indicator shown in always-off / as-needed so user knows they're not stuck
@@ -118,19 +120,6 @@ export function buildSpeedText(
   return `${spd}\n${unit}${limit}`
 }
 
-// ─── Minimap pixel dimensions (settings-adjusted) ─────────────────────────────
-
-export function minimapDims(settings: HudSettings): { w: number; h: number } {
-  const scale = settings.minimap.size / 100
-  const w = Math.round(MAP_BASE_W * scale)
-  const h = Math.round(MAP_BASE_H * scale)
-  // Clamp to SDK image container limits (20–200 w, 20–100 h)
-  return {
-    w: Math.max(20, Math.min(200, w)),
-    h: Math.max(20, Math.min(100, h)),
-  }
-}
-
 // ─── Container builders ───────────────────────────────────────────────────────
 
 /** Full-screen invisible event-capture container. Always present. */
@@ -145,7 +134,7 @@ export function buildEventContainer(): TextContainerProperty {
     borderWidth:   0,
     borderColor:   0,
     paddingLength: 0,
-    content:       ' ',
+    content:       '',
     isEventCapture: 1,
   })
 }
@@ -167,23 +156,40 @@ export function buildBannerContainer(content: string): TextContainerProperty {
   })
 }
 
-/** Minimap image container — bottom-left. Returns null if hidden. */
-export function buildMinimapContainer(settings: HudSettings): ImageContainerProperty | null {
+/** Minimap text container — bottom-left. Returns null if hidden or content empty. */
+export function buildMinimapTextContainer(
+  content: string,
+  settings: HudSettings,
+): TextContainerProperty | null {
+  if (!settings.minimap.visible || !content) return null
+
+  return new TextContainerProperty({
+    containerID:   CID.MAP,
+    containerName: 'minimap',
+    xPosition:     MAP_PAD_L,
+    yPosition:     BOTTOM_Y,
+    width:         200,
+    height:        BOTTOM_H,
+    borderWidth:   0,
+    borderColor:   0,
+    paddingLength: 2,
+    content,
+    isEventCapture: 0,
+  })
+}
+
+/** Minimap image container — bottom-left, 3:4 portrait. Returns null if hidden. */
+export function buildMinimapImageContainer(
+  settings: HudSettings,
+): ImageContainerProperty | null {
   if (!settings.minimap.visible) return null
-
-  const { w, h } = minimapDims(settings)
-
-  // Position: flush to left + bottom, with small padding
-  const x = MAP_PAD_L
-  const y = CANVAS_H - h - MAP_PAD_B
-
   return new ImageContainerProperty({
     containerID:   CID.MAP,
     containerName: 'minimap',
-    xPosition:     x,
-    yPosition:     y,
-    width:         w,
-    height:        h,
+    xPosition:     MAP_PAD_L,
+    yPosition:     MINIMAP_Y,
+    width:         MINIMAP_IMG_W,
+    height:        MINIMAP_IMG_H,
   })
 }
 
@@ -213,25 +219,3 @@ export function buildSpeedContainer(
   })
 }
 
-// ─── Opacity helpers ──────────────────────────────────────────────────────────
-//
-// The G2 has no per-container opacity. We simulate brightness by choosing
-// between different greyscale border/text intensities. The actual dimming
-// for the minimap is handled by pre-processing the image bytes before upload.
-// For text containers (banner, speed), we can't dim text directly — instead
-// we use the borderColor property as an indirect visual cue, and keep the
-// text at full brightness. The image dimming is the meaningful one.
-
-/**
- * Scales each 4-bit nibble in greyscale image bytes by a brightness factor.
- * brightness: 0.0–1.0
- */
-export function applyBrightness(bytes: Uint8Array, brightness: number): Uint8Array {
-  const out = new Uint8Array(bytes.length)
-  for (let i = 0; i < bytes.length; i++) {
-    const hi = (bytes[i] >> 4) & 0x0f
-    const lo =  bytes[i]       & 0x0f
-    out[i] = (Math.round(hi * brightness) << 4) | Math.round(lo * brightness)
-  }
-  return out
-}

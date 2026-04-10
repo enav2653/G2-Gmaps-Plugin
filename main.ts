@@ -3,28 +3,28 @@ import {
   OsEventTypeList,
   CreateStartUpPageContainer,
   RebuildPageContainer,
-  ImageRawDataUpdate,
   TextContainerUpgrade,
   TextContainerProperty,
   ImageContainerProperty,
+  ImageRawDataUpdate,
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { fetchMapSnapshot, imageToGreyscaleBytes } from './mapImage'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
+import { renderMinimapPng } from './mapImage'
 import {
   buildEventContainer,
   buildBannerContainer,
-  buildMinimapContainer,
+  buildMinimapImageContainer,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
-  applyBrightness,
-  minimapDims,
   BANNER_MODES, BannerMode,
   NavState,
   CID,
+  MINIMAP_IMG_W,
+  MINIMAP_IMG_H,
 } from './hud'
 
 // ─── App state ────────────────────────────────────────────────────────────────
@@ -43,10 +43,297 @@ let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
 let watchId:    number | null = null
-let mapRefreshTimer: ReturnType<typeof setInterval> | null = null
-let pageCreated = false
+let pageCreated  = false
+let buildingPage = false  // serialises concurrent buildPage calls
+
+// Cached reference to whichever Android/bridge location method worked
+let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number } | null>) | null = null
+let androidPollTimer: ReturnType<typeof setInterval> | null = null
+
+// Manual step preview (swipe) — null means track navigation step
+let previewStepIdx:   number | null = null
+let previewResetTimer: ReturnType<typeof setTimeout> | null = null
+
+// Speed and heading from consecutive position fixes
+let prevPollLat  = 0
+let prevPollLng  = 0
+let prevPollTime = 0
+let headingDeg   = 0   // degrees clockwise from north, smoothed EMA
+
+// Reroute guard
+let rerouteInProgress = false
+
+// ─── Bridge location probe ────────────────────────────────────────────────────
+//
+// The Even Hub WebView blocks navigator.geolocation (PERMISSION_DENIED).
+// Probe Flutter InAppWebView, Android JS interfaces, and callEvenApp.
+// Once a working provider is found it is cached in activeLocationProvider
+// so subsequent polls don't re-scan.
+
+function parseLocation(r: any): { lat: number; lng: number; speedMs?: number } | null {
+  if (r == null) return null
+  if (typeof r === 'string') {
+    try { r = JSON.parse(r) } catch { return null }
+  }
+  const speedMs = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
+  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs }
+  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs }
+  return null
+}
+
+async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null> {
+  // If we already found a working provider, use it directly
+  if (activeLocationProvider) return activeLocationProvider()
+
+  // Log visible bridge-related window properties for diagnostics
+  const bridgeKeys = Object.keys(window).filter(k =>
+    /android|bridge|even|flutter|native|webkit/i.test(k)
+  )
+  reportStatus(`window bridge keys: [${bridgeKeys.join(', ')}]`)
+
+  // --- 0. Local GPS bridge — Tasker HTTP server or companion app ----------
+  //
+  // Tasker setup (5.9+):
+  //   Task "GPS Server":
+  //     Net → HTTP Server → Start, Port 7272
+  //     Net → HTTP Server → Response, Path /location
+  //       Body: {"lat":%LOC1,"lng":%LOC2,"speed":%LOCSPEED}
+  //   (Variable Split %LOC on comma gives %LOC1=lat, %LOC2=lng; %LOCSPEED is m/s)
+  //   Run this task on profile entry (e.g. App: Even Hub)
+  //
+  // Expected response: {"lat": 37.123, "lng": -122.456, "speed": 13.4}
+  //                 or {"latitude": 37.123, "longitude": -122.456}
+  //
+  const GPS_BRIDGE_URL = 'http://127.0.0.1:7272/location'
+  try {
+    const ctrl  = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 800)
+    const res   = await fetch(GPS_BRIDGE_URL, { signal: ctrl.signal })
+    clearTimeout(timer)
+    if (res.ok) {
+      const loc = parseLocation(await res.json())
+      if (loc) {
+        reportStatus(`local GPS bridge: OK (${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)})`)
+        activeLocationProvider = async () => {
+          try {
+            const c = new AbortController()
+            const t = setTimeout(() => c.abort(), 800)
+            const r = await fetch(GPS_BRIDGE_URL, { signal: c.signal })
+            clearTimeout(t)
+            return r.ok ? parseLocation(await r.json()) : null
+          } catch { return null }
+        }
+        return loc
+      }
+    }
+  } catch { /* server not running */ }
+
+  // --- 1. Flutter InAppWebView callHandler ---
+  const fwv = (window as any).flutter_inappwebview
+  if (fwv?.callHandler) {
+    for (const method of ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getPosition']) {
+      try {
+        const r   = await fwv.callHandler(method)
+        const loc = parseLocation(r)
+        if (loc) {
+          reportStatus(`flutter_inappwebview.${method}: OK`)
+          activeLocationProvider = async () => {
+            try { return parseLocation(await fwv.callHandler(method)) } catch { return null }
+          }
+          return loc
+        }
+      } catch { }
+    }
+  }
+
+  // --- 2. Android addJavascriptInterface objects ---
+  const ifaces = ['Android', 'EvenApp', 'EvenHub', 'JsBridge', 'AndroidBridge', 'NativeBridge']
+  for (const name of ifaces) {
+    const obj = (window as any)[name]
+    if (obj == null) continue
+    reportStatus(`found window.${name}`)
+    for (const method of ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getLatLng', 'getPosition']) {
+      if (typeof obj[method] !== 'function') continue
+      try {
+        const r   = obj[method]()
+        const loc = parseLocation(r)
+        if (loc) {
+          reportStatus(`window.${name}.${method}(): OK`)
+          activeLocationProvider = () => {
+            try { return Promise.resolve(parseLocation(obj[method]())) } catch { return Promise.resolve(null) }
+          }
+          return loc
+        }
+      } catch { }
+    }
+  }
+
+  // --- 3. SDK callEvenApp (undocumented method names) ---
+  for (const method of ['getLocation', 'getCurrentLocation', 'getGpsLocation', 'getPosition', 'location']) {
+    try {
+      const r   = await bridge.callEvenApp(method)
+      const loc = parseLocation(r)
+      if (loc) {
+        reportStatus(`callEvenApp(${method}): OK`)
+        activeLocationProvider = async () => {
+          try { return parseLocation(await bridge.callEvenApp(method)) } catch { return null }
+        }
+        return loc
+      }
+    } catch { }
+  }
+
+  return null
+}
+
+// ─── Adaptive poll rate ───────────────────────────────────────────────────────
+//
+// Poll more frequently as we approach the next maneuver.
+// Distances in metres; times in ms.
+
+function pollIntervalMs(): number {
+  const d = distToManeuverM()
+  if (d <   400) return  250   // < 0.25 mi
+  if (d <  1600) return  500   // < 1 mi
+  if (d <  8000) return 1000   // < 5 mi
+  return 3000                  // >= 5 mi
+}
+
+function updatePollRate() {
+  if (!activeLocationProvider) return
+  const ms = pollIntervalMs()
+  stopAndroidPoll()
+  androidPollTimer = setInterval(pollLocation, ms)
+}
+
+// ─── Android location polling ─────────────────────────────────────────────────
+
+async function pollLocation() {
+  if (!activeLocationProvider) return
+  const loc = await activeLocationProvider()
+  if (!loc) return
+
+  const now = Date.now()
+
+  // Speed — prefer GPS-reported m/s from Tasker (%LOCSPEED); fall back to position delta
+  if (loc.speedMs != null) {
+    speedMph = loc.speedMs * 2.23694
+  } else if (prevPollTime > 0 && (prevPollLat || prevPollLng)) {
+    const distM = haversine(prevPollLat, prevPollLng, loc.lat, loc.lng)
+    const dtSec = (now - prevPollTime) / 1000
+    if (dtSec >= 0.1 && dtSec < 30) {
+      const sample = distM / dtSec * 2.23694
+      if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
+    }
+    // Heading — only update when we've moved enough to get a reliable bearing
+    if (distM > 5) {
+      const bearing = gpsHeading(prevPollLat, prevPollLng, loc.lat, loc.lng)
+      headingDeg = headingDeg * 0.6 + bearing * 0.4   // smooth EMA
+    }
+  }
+  prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
+
+  currentLat = loc.lat
+  currentLng = loc.lng
+
+  if (navState !== 'navigating') {
+    await refreshSpeed()
+    await refreshMinimap()
+    updatePollRate()
+    return
+  }
+
+  // Off-route detection — only when step has valid coordinates
+  if (!rerouteInProgress && steps[stepIdx]) {
+    const s = steps[stepIdx]
+    if ((s.startLat || s.startLng) && (s.endLat || s.endLng)) {
+      const offDist = distToSegmentM(loc.lat, loc.lng, s.startLat, s.startLng, s.endLat, s.endLng)
+      if (offDist > 150) {
+        await reroute()
+        return
+      }
+    }
+  }
+
+  const newIdx  = advanceStep(loc.lat, loc.lng)
+  const stepped = newIdx !== stepIdx
+  stepIdx = newIdx
+
+  if (stepIdx >= steps.length) {
+    navState = 'idle'
+    steps    = []
+    previewStepIdx = null
+    stopAndroidPoll()
+    await buildPage()
+    return
+  }
+
+  // Update adaptive rate now that distance may have changed
+  updatePollRate()
+
+  if (!stepped) {
+    // In-place text update only — live updates without full rebuild
+    await refreshBanner()
+    await refreshSpeed()
+    await refreshMinimap()
+    return
+  }
+
+  // Step changed — cancel any manual preview and rebuild
+  previewStepIdx = null
+  if (previewResetTimer) { clearTimeout(previewResetTimer); previewResetTimer = null }
+  await buildPage()
+}
+
+function startAndroidPoll() {
+  stopAndroidPoll()
+  if (!activeLocationProvider) return
+  const ms = pollIntervalMs()
+  reportStatus(`android poll: started (${ms} ms)`)
+  androidPollTimer = setInterval(pollLocation, ms)
+}
+
+function stopAndroidPoll() {
+  if (androidPollTimer) { clearInterval(androidPollTimer); androidPollTimer = null }
+}
+
+// ─── Step position tracking ───────────────────────────────────────────────────
+//
+// GPS is blocked in Even Hub WebView. Instead, update currentLat/currentLng
+// from the route step coordinates whenever the step changes.
+
+function syncPositionFromStep() {
+  const step = steps[stepIdx]
+  if (!step) return
+  if (step.startLat && step.startLng) {
+    currentLat = step.startLat
+    currentLng = step.startLng
+  }
+}
+
+async function changeStep(newIdx: number) {
+  previewStepIdx = newIdx
+  // Auto-return to navigation step after 10 s of no further input
+  if (previewResetTimer) clearTimeout(previewResetTimer)
+  previewResetTimer = setTimeout(async () => {
+    previewStepIdx   = null
+    previewResetTimer = null
+    await buildPage()
+  }, 10_000)
+  await buildPage()
+}
 
 // ─── GPS helpers ──────────────────────────────────────────────────────────────
+
+/** Bearing in degrees clockwise from north, from point 1 → point 2. */
+function gpsHeading(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const φ1 = lat1 * Math.PI / 180
+  const φ2 = lat2 * Math.PI / 180
+  const Δλ = (lng2 - lng1) * Math.PI / 180
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+}
 
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R    = 6371000
@@ -57,90 +344,142 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 }
 
+/** Distance from a point to a line segment, in metres. */
+function distToSegmentM(
+  lat: number, lng: number,
+  aLat: number, aLng: number,
+  bLat: number, bLng: number,
+): number {
+  const cosLat = Math.cos(aLat * Math.PI / 180)
+  const px = (lng  - aLng) * cosLat, py = lat  - aLat
+  const dx = (bLng - aLng) * cosLat, dy = bLat - aLat
+  const len2 = dx*dx + dy*dy
+  const t    = len2 > 0 ? Math.max(0, Math.min(1, (px*dx + py*dy) / len2)) : 0
+  return haversine(lat, lng, aLat + t*dy, aLng + t*(bLng - aLng))
+}
+
+/** Metres from current position to the end of the current route step. */
+function distToManeuverM(): number {
+  const step = steps[stepIdx]
+  if (!step || (!currentLat && !currentLng)) return Infinity
+  if (!step.endLat && !step.endLng) return Infinity
+  return haversine(currentLat, currentLng, step.endLat, step.endLng)
+}
+
+/** Which step to DISPLAY — may differ from stepIdx when user is previewing. */
+function effectiveStepIdx(): number {
+  return previewStepIdx ?? stepIdx
+}
+
+/** Advance past any step whose endpoint we've entered (80 m threshold). */
 function advanceStep(lat: number, lng: number): number {
   for (let i = stepIdx; i < steps.length - 1; i++) {
-    if (haversine(lat, lng, steps[i].endLat, steps[i].endLng) < 30) return i + 1
+    const s = steps[i]
+    if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
+    if (haversine(lat, lng, s.endLat, s.endLng) < 80) return i + 1
   }
   return stepIdx
 }
 
-// ─── Map image fetch + brightness ────────────────────────────────────────────
+// ─── Rerouting ────────────────────────────────────────────────────────────────
 
-async function fetchMinimap(): Promise<Uint8Array | null> {
-  if (!settings.minimap.visible) return null
+async function reroute() {
+  if (rerouteInProgress) return
+  rerouteInProgress = true
+  reportStatus('off route — rerouting…')
   try {
-    const { w, h } = minimapDims(settings)
-    reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
-    const blob  = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
-    reportStatus(`minimap blob: ${blob.size} bytes`)
-    let   bytes = await imageToGreyscaleBytes(blob, w, h)
-    reportStatus(`minimap bytes: ${bytes.length}`)
-    const br    = settings.minimap.brightness / 100
-    if (br < 1) bytes = applyBrightness(bytes, br)
-    return bytes
+    const raw = sessionStorage.getItem('g2maps_destination')
+    if (!raw) return
+    const dest = JSON.parse(raw) as { lat: number; lng: number }
+    steps   = await getRoute({ lat: currentLat, lng: currentLng }, dest)
+    stepIdx = 0
+    previewStepIdx = null
+    reportStatus(`rerouted: ${steps.length} steps`)
+    await buildPage()
   } catch (e) {
-    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
-    return null
+    reportStatus(`reroute failed: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    rerouteInProgress = false
   }
 }
 
-// ─── Full page build ──────────────────────────────────────────────────────────
+// ─── Vector minimap ───────────────────────────────────────────────────────────
 //
-// Called on first load, step change, settings change, or state change.
-// Tears down and rebuilds all containers.
+// Pure pixel renderer — draws route polylines on a dark background,
+// encodes as PNG, uploads via updateImageRawData.  No API calls.
 
-async function buildPage(mapBytes: Uint8Array | null = null) {
-  const bannerContent = buildBannerText(steps, stepIdx, navState, bannerMode)
-  const speedContent  = buildSpeedText(speedMph, limitMph, settings)
+let minimapRefreshing = false
 
-  const textContainers: TextContainerProperty[] = [buildEventContainer()]
-  const imageContainers: ImageContainerProperty[] = []
+function minimapZoom(): number {
+  const d = distToManeuverM()
+  if (d <   400) return 17
+  if (d <  1600) return 16
+  if (d <  5000) return 15
+  return 14
+}
 
-  // Banner visibility:
-  //   always-on  → always show (except passive/idle handled via content)
-  //   as-needed  → shown here at build time; dimmed via opacity simulation is
-  //                not possible — we instead show a short version
-  //   always-off → omit container entirely
-  if (bannerMode !== 'always-off') {
-    textContainers.push(buildBannerContainer(bannerContent))
+// ─── Full page build ──────────────────────────────────────────────────────────
+
+async function buildPage() {
+  if (buildingPage) {
+    reportStatus('buildPage: queued (dropping duplicate)')
+    return
   }
+  buildingPage = true
+  try {
+    const esi       = effectiveStepIdx()
+    const liveDistM = navState === 'navigating' && steps[esi]
+      ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
+      : undefined
+    const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
+    const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
-  const mapContainer = buildMinimapContainer(settings)
-  if (mapContainer) imageContainers.push(mapContainer)
+    const textContainers: TextContainerProperty[] = [buildEventContainer()]
+    if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent))
+    const speedContainer = buildSpeedContainer(speedContent, settings)
+    if (speedContainer) textContainers.push(speedContainer)
 
-  const speedContainer = buildSpeedContainer(speedContent, settings)
-  if (speedContainer) textContainers.push(speedContainer)
+    const imageContainers: ImageContainerProperty[] = []
+    const mapImgContainer = buildMinimapImageContainer(settings)
+    if (mapImgContainer) imageContainers.push(mapImgContainer)
 
-  const containerData = {
-    containerTotalNum: textContainers.length + imageContainers.length,
-    textObject:        textContainers,
-    imageObject:       imageContainers.length ? imageContainers : undefined,
+    const containerData = {
+      containerTotalNum: textContainers.length + imageContainers.length,
+      textObject:        textContainers,
+      imageObject:       imageContainers,
+    }
+
+    if (!pageCreated) {
+      const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+      pageCreated = true
+      reportStatus(`create: ${JSON.stringify(result)}`)
+    } else {
+      const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
+      reportStatus(`rebuild: ${ok}`)
+      if (!ok) {
+        pageCreated = false
+        const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
+        pageCreated = true
+        reportStatus(`recreate: ${JSON.stringify(result)}`)
+      }
+    }
+
+    // Populate image container right after page create/rebuild
+    refreshMinimap()
+  } finally {
+    buildingPage = false
   }
-
-  if (!pageCreated) {
-    const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containerData))
-    pageCreated = true
-    reportStatus(`create: ${JSON.stringify(result)}`)
-  } else {
-    const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(containerData))
-    reportStatus(`rebuild: ${ok}`)
-  }
-
-  // Upload map image after page is created (SDK requirement)
-  if (!mapContainer || !mapBytes) return
-  const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
-    containerID:   CID.MAP,
-    containerName: 'minimap',
-    imageData:     mapBytes,
-  }))
-  reportStatus(`minimap upload: ${JSON.stringify(imgResult)}`)
 }
 
 // ─── In-place banner update (fast, no flicker) ────────────────────────────────
 
 async function refreshBanner() {
   if (bannerMode === 'always-off') return
-  const content = buildBannerText(steps, stepIdx, navState, bannerMode)
+  const esi       = effectiveStepIdx()
+  const liveDistM = navState === 'navigating' && steps[esi]
+    ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
+    : undefined
+  const content = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.BANNER,
     containerName: 'banner',
@@ -160,6 +499,42 @@ async function refreshSpeed() {
     contentOffset: 0,
     contentLength: content.length,
   }))
+}
+
+async function refreshMinimap() {
+  if (!settings.minimap.visible) {
+    reportStatus('minimap: hidden in settings')
+    return
+  }
+  if (!pageCreated) {
+    reportStatus('minimap: page not yet created')
+    return
+  }
+  if (!currentLat && !currentLng) {
+    reportStatus('minimap: no GPS fix yet')
+    return
+  }
+  if (minimapRefreshing) return   // silent skip when busy
+
+  minimapRefreshing = true
+  reportStatus(`minimap: rendering (heading=${headingDeg.toFixed(0)}°)`)
+  try {
+    const pngData = await renderMinimapPng(
+      currentLat, currentLng, steps, effectiveStepIdx(),
+      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(), headingDeg,
+      reportStatus,
+    )
+    const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
+      containerID:   CID.MAP,
+      containerName: 'minimap',
+      imageData:     pngData,
+    }))
+    reportStatus(`minimap: sent ${pngData.length} bytes, result=${JSON.stringify(imgResult)}`)
+  } catch (e) {
+    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    minimapRefreshing = false
+  }
 }
 
 // ─── GPS watch ────────────────────────────────────────────────────────────────
@@ -186,25 +561,25 @@ function startGPS() {
       const newIdx = advanceStep(lat, lng)
       const stepped = newIdx !== stepIdx
       stepIdx = newIdx
+      if (stepped) syncPositionFromStep()
 
       if (stepIdx >= steps.length) {
         navState = 'idle'
         steps    = []
-        const mapBytes = await fetchMinimap()
-        await buildPage(mapBytes)
+        await buildPage()
         return
       }
 
       if (!stepped) {
         // Same step — refresh text in-place
         await refreshBanner()
-        await refreshSpeed()   // speed number + limit both live here
+        await refreshSpeed()
+        await refreshMinimap()
         return
       }
 
-      // Step changed — rebuild page with fresh minimap
-      const mapBytes = await fetchMinimap()
-      await buildPage(mapBytes)
+      // Step changed — rebuild page
+      await buildPage()
     },
     (err) => console.error('GPS error', err),
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 },
@@ -216,30 +591,6 @@ function stopGPS() {
     navigator.geolocation.clearWatch(watchId)
     watchId = null
   }
-}
-
-// ─── Minimap rotation refresh (every 5s) ─────────────────────────────────────
-//
-// The map image doesn't auto-rotate — we re-fetch periodically so the
-// map stays roughly centred on current position.
-// Heading rotation is applied server-side via the Static Maps `heading` param.
-
-function startMapRefresh() {
-  stopMapRefresh()
-  mapRefreshTimer = setInterval(async () => {
-    if (navState === 'idle') return
-    const mapBytes = await fetchMinimap()
-    if (!mapBytes) return
-    await bridge.updateImageRawData(new ImageRawDataUpdate({
-      containerID:   CID.MAP,
-      containerName: 'minimap',
-      imageData:     mapBytes,
-    }))
-  }, 5000)
-}
-
-function stopMapRefresh() {
-  if (mapRefreshTimer) { clearInterval(mapRefreshTimer); mapRefreshTimer = null }
 }
 
 // ─── IMU — heading tracking ───────────────────────────────────────────────────
@@ -261,14 +612,12 @@ function setupInput() {
         if (navState === 'paused') {
           // Tap to resume from paused state
           navState = 'navigating'
-          const mapBytes = await fetchMinimap()
-          await buildPage(mapBytes)
+          await buildPage()
           return
         }
         bannerModeIdx = (bannerModeIdx + 1) % BANNER_MODES.length
         bannerMode    = BANNER_MODES[bannerModeIdx]
-        const mapBytes = await fetchMinimap()
-        await buildPage(mapBytes)
+        await buildPage()
         break
       }
 
@@ -279,19 +628,19 @@ function setupInput() {
         break
       }
 
-      // Swipe up — previous step (manual review)
+      // Swipe up — previous step (manual preview)
       case OsEventTypeList.SCROLL_TOP_EVENT: {
-        if (!steps.length || stepIdx <= 0) break
-        stepIdx--
-        await refreshBanner()
+        const cur = effectiveStepIdx()
+        if (!steps.length || cur <= 0) break
+        await changeStep(cur - 1)
         break
       }
 
-      // Swipe down — skip to next step
+      // Swipe down — next step (manual preview)
       case OsEventTypeList.SCROLL_BOTTOM_EVENT: {
-        if (!steps.length || stepIdx >= steps.length - 1) break
-        stepIdx++
-        await refreshBanner()
+        const cur = effectiveStepIdx()
+        if (!steps.length || cur >= steps.length - 1) break
+        await changeStep(cur + 1)
         break
       }
     }
@@ -303,36 +652,32 @@ function setupInput() {
 export async function menuPauseResume() {
   if (navState === 'paused') {
     navState = 'navigating'
-    startGPS()
+    if (activeLocationProvider) { startAndroidPoll() } else { startGPS() }
   } else {
     navState = 'paused'
     stopGPS()
+    stopAndroidPoll()
   }
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
+  await buildPage()
 }
 
 export async function menuPassiveMode() {
   if (navState !== 'passive') {
     navState = 'passive'
     stopGPS()
-    const mapBytes = await fetchMinimap()
-    await buildPage(mapBytes)
-    startMapRefresh()
+    await buildPage()
     return
   }
 
   // Return to navigation if we have a route
   navState = steps.length ? 'navigating' : 'idle'
   if (navState === 'navigating') startGPS()
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
-  startMapRefresh()
+  await buildPage()
 }
 
 export async function menuEndNavigation() {
   stopGPS()
-  stopMapRefresh()
+  stopAndroidPoll()
   resetSpeedLimitCache()
   limitMph = null
   steps    = []
@@ -340,57 +685,76 @@ export async function menuEndNavigation() {
   navState = 'idle'
   sessionStorage.removeItem('g2maps_destination')
   sessionStorage.removeItem('g2maps_origin')
-  await buildPage(null)
+  await buildPage()
 }
 
 // ─── Settings hot-reload (called when user saves settings on phone) ───────────
 
 export async function reloadSettings() {
   settings = loadSettings()
-  const mapBytes = await fetchMinimap()
-  await buildPage(mapBytes)
+  await buildPage()
 }
 
 // ─── Navigation start ─────────────────────────────────────────────────────────
 
 export async function startNavigation() {
   stopGPS()
-  stopMapRefresh()
+  stopAndroidPoll()
   resetSpeedLimitCache()
   limitMph = null
 
   const raw = sessionStorage.getItem('g2maps_destination')
   if (!raw) {
     navState = 'idle'
-    await buildPage(null)
+    await buildPage()
     return
   }
 
   navState = 'navigating'
-  await buildPage(null)
+  await buildPage()
 
   const dest   = JSON.parse(raw) as { lat: number; lng: number; label: string }
   const rawOrg = sessionStorage.getItem('g2maps_origin')
 
   try {
+    // Always probe Android/bridge — sets activeLocationProvider for live polling
+    // even when an origin address is already known.
+    reportStatus('probing Android location…')
+    const bridgeLoc = await tryBridgeLocation()
+
     if (rawOrg) {
+      // Use typed origin as starting point (more reliable than live GPS for routing)
       const org  = JSON.parse(rawOrg) as { lat: number; lng: number; label: string }
       currentLat = org.lat
       currentLng = org.lng
       reportStatus(`origin: ${org.label}`)
+      if (bridgeLoc) reportStatus('android GPS active for live tracking')
+    } else if (bridgeLoc) {
+      currentLat = bridgeLoc.lat
+      currentLng = bridgeLoc.lng
+      reportStatus(`android GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
     } else {
-      reportStatus('trying GPS…')
-      const pos = await new Promise<GeolocationPosition>((res, rej) => {
-        const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
-        navigator.geolocation.getCurrentPosition(
-          p => { clearTimeout(timer); res(p) },
-          e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
-          { enableHighAccuracy: false },
-        )
-      })
-      currentLat = pos.coords.latitude
-      currentLng = pos.coords.longitude
-      reportStatus(`GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+      // Fall back to WebView geolocation (blocked in Even Hub — prompts user to set origin)
+      reportStatus('trying WebView GPS…')
+      try {
+        const pos = await new Promise<GeolocationPosition>((res, rej) => {
+          const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
+          navigator.geolocation.getCurrentPosition(
+            p => { clearTimeout(timer); res(p) },
+            e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
+            { enableHighAccuracy: false },
+          )
+        })
+        currentLat = pos.coords.latitude
+        currentLng = pos.coords.longitude
+        reportStatus(`WebView GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
+      } catch (gpsErr) {
+        reportStatus(`GPS failed: ${gpsErr instanceof Error ? gpsErr.message : String(gpsErr)}`)
+        reportStatus('enter a starting address to navigate')
+        navState = 'idle'
+        await buildPage()
+        return
+      }
     }
 
     reportStatus('fetching route…')
@@ -400,21 +764,27 @@ export async function startNavigation() {
 
     if (!steps.length) {
       navState = 'idle'
-      await buildPage(null)
+      await buildPage()
       return
     }
 
-    const mapBytes = await fetchMinimap()
-    await buildPage(mapBytes)
+    // Use step 0's start coordinates (more precise than geocoded address)
+    syncPositionFromStep()
 
-    startGPS()
-    startMapRefresh()
+    await buildPage()
+
+    // Prefer Android location polling when available; fall back to WebView GPS
+    if (activeLocationProvider) {
+      startAndroidPoll()
+    } else {
+      startGPS()
+    }
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     reportStatus(`nav error: ${msg}`)
     navState = 'idle'
-    await buildPage(null)
+    await buildPage()
     throw err
   }
 }
@@ -439,13 +809,22 @@ async function init() {
     if (sys.eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT) {
       refreshBanner()
       refreshSpeed()
-    }
-    if (sys.eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT) {
-      stopMapRefresh()
+      refreshMinimap()
     }
   })
 
-  await buildPage(null)
+  // Probe GPS now so minimap has coordinates before the first buildPage.
+  // Also caches activeLocationProvider for the navigation poll loop.
+  try {
+    const loc = await tryBridgeLocation()
+    if (loc) {
+      currentLat = loc.lat
+      currentLng = loc.lng
+      reportStatus(`init GPS: ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`)
+    }
+  } catch { /* GPS probe failure is non-fatal */ }
+
+  await buildPage()
 
   // Listen for phone-side events
   window.addEventListener('g2maps:navigate',  () => startNavigation())
