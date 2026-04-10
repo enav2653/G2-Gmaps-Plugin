@@ -172,7 +172,7 @@ export function buildMinimapTextContainer(
   if (!settings.minimap.visible || !content) return null
 
   return new TextContainerProperty({
-    containerID:   CID.MAP,
+    containerID:   CID.MAP_TL,
     containerName: 'minimap',
     xPosition:     MAP_PAD_L,
     yPosition:     BOTTOM_Y,
