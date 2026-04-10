@@ -80,7 +80,7 @@ interface StepCoords {
   endLng: number
 }
 
-export function renderMinimapBmp(
+function renderPixels(
   lat: number,
   lng: number,
   steps: StepCoords[],
@@ -88,7 +88,7 @@ export function renderMinimapBmp(
   w: number,
   h: number,
   zoom: number,
-): number[] {
+): Uint8Array {
   const METERS_PER_DEG = 111_320
   const cosLat = Math.cos(lat * Math.PI / 180)
   const mpp = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
@@ -179,5 +179,32 @@ export function renderMinimapBmp(
     setPixel(w - 1 - i, h - 1,     CV); setPixel(w - 1,     h - 1 - i, CV)  // bottom-right
   }
 
-  return Array.from(encodeGreyscale4BitBmp(w, h, pixels))
+  return pixels
+}
+
+export function renderMinimapBmp(
+  lat: number, lng: number, steps: StepCoords[], stepIdx: number,
+  w: number, h: number, zoom: number,
+): number[] {
+  return Array.from(encodeGreyscale4BitBmp(w, h, renderPixels(lat, lng, steps, stepIdx, w, h, zoom)))
+}
+
+export function renderMinimapBmpTiles(
+  lat: number, lng: number, steps: StepCoords[], stepIdx: number,
+  totalW: number, totalH: number, tileW: number, tileH: number, zoom: number,
+): number[][] {
+  const pixels = renderPixels(lat, lng, steps, stepIdx, totalW, totalH, zoom)
+  const cols = totalW / tileW
+  const rows = totalH / tileH
+  const tiles: number[][] = []
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const sub = new Uint8Array(tileW * tileH)
+      for (let y = 0; y < tileH; y++)
+        for (let x = 0; x < tileW; x++)
+          sub[y * tileW + x] = pixels[(row * tileH + y) * totalW + (col * tileW + x)]
+      tiles.push(Array.from(encodeGreyscale4BitBmp(tileW, tileH, sub)))
+    }
+  }
+  return tiles
 }

@@ -12,11 +12,14 @@ import {
 import { getRoute, RouteStep } from './maps'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
-import { renderMinimapBmp } from './mapImage'
+import { renderMinimapBmpTiles } from './mapImage'
 import {
   buildEventContainer,
   buildBannerContainer,
-  buildMinimapImageContainer,
+  buildMinimapImageContainers,
+  MAP_TILE_CIDS,
+  MINIMAP_TILE_W,
+  MINIMAP_TILE_H,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
@@ -423,9 +426,9 @@ async function buildPage() {
     const speedContainer = buildSpeedContainer(speedContent, settings)
     if (speedContainer) textContainers.push(speedContainer)
 
-    const imageContainers: ImageContainerProperty[] = []
-    const mapImgContainer = buildMinimapImageContainer(settings)
-    if (mapImgContainer) imageContainers.push(mapImgContainer)
+    const imageContainers: ImageContainerProperty[] = [
+      ...buildMinimapImageContainers(settings),
+    ]
 
     const containerData = {
       containerTotalNum: textContainers.length + imageContainers.length,
@@ -490,16 +493,18 @@ async function refreshMinimap() {
 
   minimapRefreshing = true
   try {
-    const bmpData = renderMinimapBmp(
+    const tiles = renderMinimapBmpTiles(
       currentLat, currentLng, steps, effectiveStepIdx(),
-      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
+      MINIMAP_IMG_W, MINIMAP_IMG_H, MINIMAP_TILE_W, MINIMAP_TILE_H, minimapZoom(),
     )
-    const result = await bridge.updateImageRawData(new ImageRawDataUpdate({
-      containerID:   CID.MAP,
-      containerName: 'minimap',
-      imageData:     bmpData,
-    }))
-    reportStatus(`minimap: ${bmpData.length}B → ${JSON.stringify(result)}`)
+    const results = await Promise.all(tiles.map((tileData, i) =>
+      bridge.updateImageRawData(new ImageRawDataUpdate({
+        containerID:   MAP_TILE_CIDS[i],
+        containerName: `minimap_${i % 2}_${Math.floor(i / 2)}`,
+        imageData:     tileData,
+      }))
+    ))
+    reportStatus(`minimap: ${tiles[0].length}B×4 → ${JSON.stringify(results)}`)
   } catch (e) {
     reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {

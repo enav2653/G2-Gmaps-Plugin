@@ -39,10 +39,14 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 0
 
-// Minimap image dimensions — testing 200×136 (demo app height)
-export const MINIMAP_IMG_W = 200
-export const MINIMAP_IMG_H = 136
-const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 152 — bottom-aligned
+// Minimap tile dimensions — 2×2 grid of 50×50 tiles = 100×100 total
+export const MINIMAP_TILE_W  = 50
+export const MINIMAP_TILE_H  = 50
+const        MINIMAP_COLS    = 2
+const        MINIMAP_ROWS    = 2
+export const MINIMAP_IMG_W   = MINIMAP_TILE_W * MINIMAP_COLS  // 100
+export const MINIMAP_IMG_H   = MINIMAP_TILE_H * MINIMAP_ROWS  // 100
+const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 188 — bottom-aligned
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
@@ -50,11 +54,16 @@ const SPD_RIGHT_MARGIN = 8
 // ─── Container IDs ───────────────────────────────────────────────────────────
 
 export const CID = {
-  EVENT:  1,
-  BANNER: 2,
-  MAP:    3,
-  SPEED:  4,
+  EVENT:   1,
+  BANNER:  2,
+  MAP_TL:  3,   // top-left  tile
+  SPEED:   4,
+  MAP_TR:  5,   // top-right tile
+  MAP_BL:  6,   // bot-left  tile
+  MAP_BR:  7,   // bot-right tile
 } as const
+
+export const MAP_TILE_CIDS = [CID.MAP_TL, CID.MAP_TR, CID.MAP_BL, CID.MAP_BR] as const
 
 // ─── Banner modes ─────────────────────────────────────────────────────────────
 
@@ -177,19 +186,25 @@ export function buildMinimapTextContainer(
   })
 }
 
-/** Minimap image container — bottom-left. Returns null if hidden. */
-export function buildMinimapImageContainer(
+/** Minimap image containers — 2×2 grid of 50×50 tiles. Returns [] if hidden. */
+export function buildMinimapImageContainers(
   settings: HudSettings,
-): ImageContainerProperty | null {
-  if (!settings.minimap.visible) return null
-  return new ImageContainerProperty({
-    containerID:   CID.MAP,
-    containerName: 'minimap',
-    xPosition:     MAP_PAD_L,
-    yPosition:     MINIMAP_Y,
-    width:         MINIMAP_IMG_W,
-    height:        MINIMAP_IMG_H,
-  })
+): ImageContainerProperty[] {
+  if (!settings.minimap.visible) return []
+  const tiles: { id: number; col: number; row: number }[] = [
+    { id: CID.MAP_TL, col: 0, row: 0 },
+    { id: CID.MAP_TR, col: 1, row: 0 },
+    { id: CID.MAP_BL, col: 0, row: 1 },
+    { id: CID.MAP_BR, col: 1, row: 1 },
+  ]
+  return tiles.map(({ id, col, row }) => new ImageContainerProperty({
+    containerID:   id,
+    containerName: `minimap_${col}_${row}`,
+    xPosition:     MAP_PAD_L + col * MINIMAP_TILE_W,
+    yPosition:     MINIMAP_Y + row * MINIMAP_TILE_H,
+    width:         MINIMAP_TILE_W,
+    height:        MINIMAP_TILE_H,
+  }))
 }
 
 /** Speed stack text container — bottom-right. Returns null if hidden. */
