@@ -120,6 +120,10 @@ export async function renderMinimapPng(
   const cy = h / 2
 
   const pixels = new Uint8Array(w * h).fill(0)
+  // Seed every 16th pixel with brightness=1 (maps to grey-level 0 on the
+  // 4-bit display — visually identical to black) so that deflate cannot
+  // collapse the mostly-zero image below the firmware's minimum byte floor.
+  for (let i = 0; i < pixels.length; i += 16) pixels[i] = 1
 
   function toPixel(plat: number, plng: number): [number, number] {
     const px = cx + (plng - lng) * cosLat * METERS_PER_DEG / mpp
