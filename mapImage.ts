@@ -128,6 +128,11 @@ function renderPixels(
     }
   }
 
+  // forcePixel always writes — used for the position pin so it sits on top of everything
+  function forcePixel(x: number, y: number, v: number) {
+    if (x >= 0 && x < w && y >= 0 && y < h) pixels[y * w + x] = v
+  }
+
   // Bresenham line — draws extra pixel for thick lines (current step)
   function drawLine(x0: number, y0: number, x1: number, y1: number, v: number, thick: boolean) {
     const dx = Math.abs(x1 - x0)
@@ -200,14 +205,6 @@ function renderPixels(
     }
   }
 
-  // ── Position marker — filled diamond at current position ──────────────────────
-  const [posX, posY] = toPixel(lat, lng)
-  setPixel(posX,     posY,     255)
-  setPixel(posX + 1, posY,     255); setPixel(posX - 1, posY,     255)
-  setPixel(posX,     posY + 1, 255); setPixel(posX,     posY - 1, 255)
-  setPixel(posX + 1, posY + 1, 200); setPixel(posX - 1, posY + 1, 200)
-  setPixel(posX + 1, posY - 1, 200); setPixel(posX - 1, posY - 1, 200)
-
   // ── Corner brackets ───────────────────────────────────────────────────────────
   const CL = 12  // arm length in pixels
   const CV = 180 // brightness
@@ -233,6 +230,30 @@ function renderPixels(
       const ly = Math.round(cy - gr * Math.cos(a) - GLYPH_H / 2)
       drawGlyph(label, lx, ly, gc)
     }
+  }
+
+  // ── Position pin — Google Maps-style teardrop, drawn last so it is always on top ──
+  //
+  // Shape (5 wide × 7 tall), tip at current position (posX, posY):
+  //
+  //   . X X X .   dy = -6
+  //   X X X X X   dy = -5
+  //   X X X X X   dy = -4  ← circle centre
+  //   X X X X X   dy = -3
+  //   . X X X .   dy = -2
+  //   . . X . .   dy = -1
+  //   . . X . .   dy =  0  ← tip = current position
+  //
+  // Brightness = midpoint between current-step route (240) and background roads (40).
+  {
+    const [posX, posY] = toPixel(lat, lng)
+    const PV = 140
+    for (let dx = -1; dx <= 1; dx++) forcePixel(posX + dx, posY - 6, PV)  // top cap
+    for (let dy = -5; dy <= -3; dy++)
+      for (let dx = -2; dx <= 2; dx++) forcePixel(posX + dx, posY + dy, PV)  // circle body
+    for (let dx = -1; dx <= 1; dx++) forcePixel(posX + dx, posY - 2, PV)  // bottom of circle
+    forcePixel(posX, posY - 1, PV)  // tail
+    forcePixel(posX, posY,     PV)  // tip
   }
 
   return pixels
