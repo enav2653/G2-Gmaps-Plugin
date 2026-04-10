@@ -494,11 +494,12 @@ async function refreshMinimap() {
       currentLat, currentLng, steps, effectiveStepIdx(),
       MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
     )
-    await bridge.updateImageRawData(new ImageRawDataUpdate({
+    const result = await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,
       containerName: 'minimap',
       imageData:     pngData,
     }))
+    reportStatus(`minimap: ${pngData.length}B → ${JSON.stringify(result)}`)
   } catch (e) {
     reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
