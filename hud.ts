@@ -39,10 +39,10 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 0
 
-// Minimap image dimensions — testing 200×200 (BMP format)
+// Minimap image dimensions — testing 200×136 (demo app height)
 export const MINIMAP_IMG_W = 200
-export const MINIMAP_IMG_H = 200
-const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 88 — bottom-aligned
+export const MINIMAP_IMG_H = 136
+const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 152 — bottom-aligned
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
