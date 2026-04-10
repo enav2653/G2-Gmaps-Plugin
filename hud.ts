@@ -39,9 +39,10 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 4
 
-// Minimap image dimensions (must match Google Static Maps fetch size)
-export const MINIMAP_IMG_W = 200
-export const MINIMAP_IMG_H = BOTTOM_H   // 92
+// Minimap image dimensions — slightly taller than wide, anchored to bottom-left
+export const MINIMAP_IMG_W = 120
+export const MINIMAP_IMG_H = 130
+const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 158
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
@@ -185,7 +186,7 @@ export function buildMinimapImageContainer(
     containerID:   CID.MAP,
     containerName: 'minimap',
     xPosition:     MAP_PAD_L,
-    yPosition:     BOTTOM_Y,
+    yPosition:     MINIMAP_Y,
     width:         MINIMAP_IMG_W,
     height:        MINIMAP_IMG_H,
   })

@@ -120,7 +120,7 @@ export async function renderMinimapPng(
   const cx = w / 2
   const cy = h / 2
 
-  const pixels = new Uint8Array(w * h).fill(20)
+  const pixels = new Uint8Array(w * h).fill(0)
 
   function toPixel(plat: number, plng: number): [number, number] {
     const px = cx + (plng - lng) * cosLat * METERS_PER_DEG / mpp
