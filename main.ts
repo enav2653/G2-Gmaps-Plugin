@@ -38,7 +38,7 @@ let settings: HudSettings = loadSettings()
 
 let steps:       RouteStep[] = []
 let stepIdx      = 0
-let navState:    NavState    = 'idle'
+let navState:    NavState    = 'passive'
 let bannerMode:  BannerMode  = 'always-on'
 let bannerModeIdx = 0
 
@@ -880,6 +880,21 @@ async function init() {
   })
 
   await buildPage()
+
+  // Start passive GPS immediately — probe the Android bridge first, fall back
+  // to WebView geolocation.  startNavigation() calls stop* before taking over,
+  // so this won't interfere with a later navigation session.
+  tryBridgeLocation()
+    .then(loc => {
+      if (loc) {
+        currentLat = loc.lat
+        currentLng = loc.lng
+        startAndroidPoll()
+      } else {
+        startGPS()
+      }
+    })
+    .catch(() => startGPS())
 
   // Listen for phone-side events
   window.addEventListener('g2maps:navigate',  () => startNavigation())
