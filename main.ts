@@ -10,7 +10,7 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
-import { fetchMapSnapshot, imageToGreyscaleBytes } from './mapImage'
+import { fetchMapSnapshot, imageToBytes } from './mapImage'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import {
@@ -20,7 +20,6 @@ import {
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
-  applyBrightness,
   minimapDims,
   BANNER_MODES, BannerMode,
   NavState,
@@ -73,10 +72,9 @@ async function fetchMinimap(): Promise<Uint8Array | null> {
     reportStatus(`minimap fetch: ${currentLat.toFixed(4)},${currentLng.toFixed(4)} ${w}x${h}`)
     const blob  = await fetchMapSnapshot(currentLat, currentLng, { widthPx: w, heightPx: h, zoom: 17 })
     reportStatus(`minimap blob: ${blob.size} bytes`)
-    let   bytes = await imageToGreyscaleBytes(blob, w, h)
-    reportStatus(`minimap bytes: ${bytes.length}`)
     const br    = settings.minimap.brightness / 100
-    if (br < 1) bytes = applyBrightness(bytes, br)
+    const bytes = await imageToBytes(blob, w, h, br)
+    reportStatus(`minimap bytes: ${bytes.length}`)
     return bytes
   } catch (e) {
     reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)

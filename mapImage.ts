@@ -23,12 +23,21 @@ export async function fetchMapSnapshot(lat: number, lng: number, opts: MapImageO
 }
 
 /**
- * Convert a PNG/JPEG blob to 4-bit greyscale packed bytes (2 pixels per byte,
- * high nibble first) as expected by bridge.updateImageRawData().
+ * Convert a PNG/JPEG blob to raw PNG bytes with optional brightness applied.
  *
- * Uses HTMLCanvasElement instead of OffscreenCanvas for WebView compatibility.
+ * The G2 firmware converts the image to 4-bit greyscale internally, so we
+ * send a standard PNG. Brightness (0.0–1.0) is applied via canvas filter
+ * before re-encoding. When brightness is 1.0 the raw blob bytes are returned
+ * directly without a canvas round-trip.
+ *
+ * Uses HTMLCanvasElement for WebView compatibility.
  */
-export async function imageToGreyscaleBytes(blob: Blob, w: number, h: number): Promise<Uint8Array> {
+export async function imageToBytes(blob: Blob, w: number, h: number, brightness: number): Promise<Uint8Array> {
+  // Fast path: no brightness adjustment needed
+  if (brightness >= 1) {
+    return new Uint8Array(await blob.arrayBuffer())
+  }
+
   const url = URL.createObjectURL(blob)
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
@@ -41,18 +50,11 @@ export async function imageToGreyscaleBytes(blob: Blob, w: number, h: number): P
   canvas.width  = w
   canvas.height = h
   const ctx = canvas.getContext('2d')!
+  ctx.filter = `brightness(${brightness})`
   ctx.drawImage(img, 0, 0, w, h)
 
-  const { data } = ctx.getImageData(0, 0, w, h)
-  const out = new Uint8Array(Math.ceil((w * h) / 2))
-
-  for (let i = 0; i < w * h; i++) {
-    const luma   = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2]
-    const nibble = Math.min(15, Math.round((luma / 255) * 15))
-    const bi     = Math.floor(i / 2)
-    if (i % 2 === 0) { out[bi] = nibble << 4; continue }
-    out[bi] |= nibble & 0x0f
-  }
-
-  return out
+  const adjusted = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
+  })
+  return new Uint8Array(await adjusted.arrayBuffer())
 }
