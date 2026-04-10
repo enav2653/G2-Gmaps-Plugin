@@ -522,6 +522,7 @@ async function refreshMinimap() {
     const pngData = await renderMinimapPng(
       currentLat, currentLng, steps, effectiveStepIdx(),
       MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(), headingDeg,
+      reportStatus,
     )
     await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,

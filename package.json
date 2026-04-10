@@ -1,6 +1,6 @@
 {
   "name": "g2-maps",
-  "version": "0.2.32",
+  "version": "0.2.33",
   "description": "Google Maps HUD navigation for Even Realities G2 glasses",
   "type": "module",
   "scripts": {

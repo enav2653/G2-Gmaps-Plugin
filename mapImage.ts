@@ -133,6 +133,7 @@ async function fetchHeadingUpBackground(
   lat: number, lng: number,
   w: number, h: number,
   zoom: number, headingDeg: number,
+  log?: (msg: string) => void,
 ): Promise<Uint8Array> {
   const diag = Math.ceil(Math.sqrt(w * w + h * h)) + 2
   let src: Uint8Array
@@ -142,8 +143,9 @@ async function fetchHeadingUpBackground(
     src = await imageBlobToGreyscale8bit(blob, diag, diag)
     // Scale brightness: roads ~28–73, highways ~73 — leaves 240 for route overlay
     for (let i = 0; i < src.length; i++) src[i] = Math.round(src[i] * 0.55)
-  } catch {
-    src = new Uint8Array(diag * diag).fill(20)
+  } catch (e) {
+    log?.(`minimap bg: ${e instanceof Error ? e.message : String(e)}`)
+    src = new Uint8Array(diag * diag).fill(35)
   }
 
   // Rotate src (diag×diag) by headingDeg → crop centre w×h
@@ -196,8 +198,9 @@ export async function renderMinimapPng(
   h: number,
   zoom: number,
   headingDeg = 0,
+  log?: (msg: string) => void,
 ): Promise<number[]> {
-  const pixels = await fetchHeadingUpBackground(lat, lng, w, h, zoom, headingDeg)
+  const pixels = await fetchHeadingUpBackground(lat, lng, w, h, zoom, headingDeg, log)
 
   const METERS_PER_DEG = 111_320
   const cosLat = Math.cos(lat * Math.PI / 180)
@@ -259,24 +262,26 @@ export async function renderMinimapPng(
     }
   }
 
-  // Next turn marker — cross at end of current step
+  // Next turn marker — 3×3 bright square at end of current step
   if (stepIdx < steps.length) {
     const s = steps[stepIdx]
     if (s.endLat || s.endLng) {
       const [tx, ty] = toPixel(s.endLat, s.endLng)
-      setPixel(tx, ty, 255)
-      setPixel(tx+1, ty, 210); setPixel(tx-1, ty, 210)
-      setPixel(tx, ty+1, 210); setPixel(tx, ty-1, 210)
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++)
+          setPixel(tx+dx, ty+dy, 255)
     }
   }
 
-  // Position marker — filled diamond
+  // Position marker — 5×5 white square, clearly visible
   const [posX, posY] = toPixel(lat, lng)
-  setPixel(posX,   posY,   255)
-  setPixel(posX+1, posY,   255); setPixel(posX-1, posY,   255)
-  setPixel(posX,   posY+1, 255); setPixel(posX,   posY-1, 255)
-  setPixel(posX+1, posY+1, 200); setPixel(posX-1, posY+1, 200)
-  setPixel(posX+1, posY-1, 200); setPixel(posX-1, posY-1, 200)
+  for (let dy = -2; dy <= 2; dy++)
+    for (let dx = -2; dx <= 2; dx++)
+      setPixel(posX+dx, posY+dy, 255)
+
+  // Bright border so we can confirm the container is rendering
+  for (let x = 0; x < w; x++) { setPixel(x, 0, 200); setPixel(x, h-1, 200) }
+  for (let y = 0; y < h; y++) { setPixel(0, y, 200); setPixel(w-1, y, 200) }
 
   return Array.from(await encodeGreyscalePng(w, h, pixels))
 }
