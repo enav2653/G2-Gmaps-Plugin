@@ -232,28 +232,36 @@ function renderPixels(
     }
   }
 
-  // ── Position pin — Google Maps-style teardrop, drawn last so it is always on top ──
+  // ── Position arrow — navigation chevron drawn last so it is always on top ────
   //
-  // Shape (5 wide × 7 tall), tip at current position (posX, posY):
+  // 9 wide × 7 tall, centred on current position. Tip always points screen-up,
+  // which equals the heading direction on a heading-up map.
   //
-  //   . X X X .   dy = -6
-  //   X X X X X   dy = -5
-  //   X X X X X   dy = -4  ← circle centre
-  //   X X X X X   dy = -3
-  //   . X X X .   dy = -2
-  //   . . X . .   dy = -1
-  //   . . X . .   dy =  0  ← tip = current position
+  //   col: -4 -3 -2 -1  0 +1 +2 +3 +4
+  //         .  .  .  .  X  .  .  .  .   dy = -3  ← tip
+  //         .  .  .  X  X  X  .  .  .   dy = -2
+  //         .  .  X  X  X  X  X  .  .   dy = -1
+  //         .  X  X  X  X  X  X  X  .   dy =  0  ← centre / current position
+  //         X  X  X  X  X  X  X  X  X   dy = +1  ← widest (base)
+  //         X  X  .  .  .  .  .  X  X   dy = +2  ← concave wings
+  //         .  X  .  .  .  .  .  X  .   dy = +3  ← concave wings (flying-V notch)
   //
   // Brightness = midpoint between current-step route (240) and background roads (40).
   {
     const [posX, posY] = toPixel(lat, lng)
     const PV = 140
-    for (let dx = -1; dx <= 1; dx++) forcePixel(posX + dx, posY - 6, PV)  // top cap
-    for (let dy = -5; dy <= -3; dy++)
-      for (let dx = -2; dx <= 2; dx++) forcePixel(posX + dx, posY + dy, PV)  // circle body
-    for (let dx = -1; dx <= 1; dx++) forcePixel(posX + dx, posY - 2, PV)  // bottom of circle
-    forcePixel(posX, posY - 1, PV)  // tail
-    forcePixel(posX, posY,     PV)  // tip
+    const shape = [
+      [0,0,0,0,1,0,0,0,0],  // dy=-3  tip
+      [0,0,0,1,1,1,0,0,0],  // dy=-2
+      [0,0,1,1,1,1,1,0,0],  // dy=-1
+      [0,1,1,1,1,1,1,1,0],  // dy= 0  centre
+      [1,1,1,1,1,1,1,1,1],  // dy=+1  widest
+      [1,1,0,0,0,0,0,1,1],  // dy=+2  wings
+      [0,1,0,0,0,0,0,1,0],  // dy=+3  wings (flying-V notch)
+    ]
+    for (let dy = 0; dy < shape.length; dy++)
+      for (let dx = 0; dx < 9; dx++)
+        if (shape[dy][dx]) forcePixel(posX + dx - 4, posY + dy - 3, PV)
   }
 
   return pixels
