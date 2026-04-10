@@ -39,14 +39,15 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 0
 
-// Minimap tile dimensions — 2×2 grid of 75×75 tiles = 150×150 total
-export const MINIMAP_TILE_W  = 75
-export const MINIMAP_TILE_H  = 75
+// Minimap tile dimensions — 2×2 grid of 62×62 tiles = 124×124 total
+// (125 can't be halved evenly; 124 is the nearest clean split)
+export const MINIMAP_TILE_W  = 62
+export const MINIMAP_TILE_H  = 62
 const        MINIMAP_COLS    = 2
 const        MINIMAP_ROWS    = 2
-export const MINIMAP_IMG_W   = MINIMAP_TILE_W * MINIMAP_COLS  // 150
-export const MINIMAP_IMG_H   = MINIMAP_TILE_H * MINIMAP_ROWS  // 150
-const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 138 — bottom-aligned
+export const MINIMAP_IMG_W   = MINIMAP_TILE_W * MINIMAP_COLS  // 124
+export const MINIMAP_IMG_H   = MINIMAP_TILE_H * MINIMAP_ROWS  // 124
+const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-aligned
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8

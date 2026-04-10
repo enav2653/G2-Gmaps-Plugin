@@ -59,18 +59,19 @@ function encodeGreyscale4BitBmp(width: number, height: number, pixels: Uint8Arra
   return bmp
 }
 
-// ─── 5×5 bitmap glyphs for compass labels ────────────────────────────────────
+// ─── 8×8 bitmap glyphs for compass labels ────────────────────────────────────
 //
-// Each entry is 5 rows; each row is a 5-bit mask (MSB = left pixel).
+// Nearest-neighbour upscale of the original 5×5 designs to 8×8 (~60% larger).
+// Each entry is 8 rows; each row is an 8-bit mask (MSB = left pixel).
 
 const COMPASS_GLYPHS: Record<string, number[]> = {
-  N: [0b10001, 0b11001, 0b10101, 0b10011, 0b10001],
-  S: [0b01110, 0b10000, 0b01110, 0b00001, 0b01110],
-  E: [0b11111, 0b10000, 0b11100, 0b10000, 0b11111],
-  W: [0b10001, 0b10001, 0b10101, 0b11011, 0b10001],
+  N: [0b11000001, 0b11000001, 0b11110001, 0b11110001, 0b11001001, 0b11000111, 0b11000111, 0b11000001],
+  S: [0b00111110, 0b00111110, 0b11000000, 0b11000000, 0b00111110, 0b00000001, 0b00000001, 0b00111110],
+  E: [0b11111111, 0b11111111, 0b11000000, 0b11000000, 0b11111000, 0b11000000, 0b11000000, 0b11111111],
+  W: [0b11000001, 0b11000001, 0b11000001, 0b11000001, 0b11001001, 0b11110111, 0b11110111, 0b11000001],
 }
-const GLYPH_W = 5
-const GLYPH_H = 5
+const GLYPH_W = 8
+const GLYPH_H = 8
 
 // ─── Vector minimap renderer ──────────────────────────────────────────────────
 //
@@ -160,7 +161,7 @@ function renderPixels(
     for (let j = 0; j < road.length - 1; j++) {
       const [px0, py0] = toPixel(road[j][0],     road[j][1])
       const [px1, py1] = toPixel(road[j + 1][0], road[j + 1][1])
-      drawLine(px0, py0, px1, py1, 30, false)
+      drawLine(px0, py0, px1, py1, 40, false)
     }
   }
 
