@@ -529,7 +529,7 @@ async function refreshMinimap() {
       containerName: 'minimap',
       imageData:     pngData,
     }))
-    reportStatus(`minimap: sent ${pngData.length} pixels, result=${JSON.stringify(imgResult)}`)
+    reportStatus(`minimap: sent ${pngData.length} bytes, result=${JSON.stringify(imgResult)}`)
   } catch (e) {
     reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
