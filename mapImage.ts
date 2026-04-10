@@ -59,19 +59,19 @@ function encodeGreyscale4BitBmp(width: number, height: number, pixels: Uint8Arra
   return bmp
 }
 
-// ─── 8×8 bitmap glyphs for compass labels ────────────────────────────────────
+// ─── 7×7 bitmap glyphs for compass labels ────────────────────────────────────
 //
-// Nearest-neighbour upscale of the original 5×5 designs to 8×8 (~60% larger).
-// Each entry is 8 rows; each row is an 8-bit mask (MSB = left pixel).
+// Hand-drawn at 7×7 with single-pixel-wide strokes so they match the
+// crispness of the Bresenham route lines. Each row is a 7-bit mask (MSB = left).
 
 const COMPASS_GLYPHS: Record<string, number[]> = {
-  N: [0b11000001, 0b11000001, 0b11110001, 0b11110001, 0b11001001, 0b11000111, 0b11000111, 0b11000001],
-  S: [0b00111110, 0b00111110, 0b11000000, 0b11000000, 0b00111110, 0b00000001, 0b00000001, 0b00111110],
-  E: [0b11111111, 0b11111111, 0b11000000, 0b11000000, 0b11111000, 0b11000000, 0b11000000, 0b11111111],
-  W: [0b11000001, 0b11000001, 0b11000001, 0b11000001, 0b11001001, 0b11110111, 0b11110111, 0b11000001],
+  N: [0b1000001, 0b1100001, 0b1010001, 0b1001001, 0b1000101, 0b1000011, 0b1000001],
+  S: [0b0111110, 0b1000000, 0b1000000, 0b0111110, 0b0000001, 0b0000001, 0b0111110],
+  E: [0b1111111, 0b1000000, 0b1000000, 0b1111100, 0b1000000, 0b1000000, 0b1111111],
+  W: [0b1000001, 0b1000001, 0b1000001, 0b1010101, 0b1010101, 0b0100010, 0b0100010],
 }
-const GLYPH_W = 8
-const GLYPH_H = 8
+const GLYPH_W = 7
+const GLYPH_H = 7
 
 // ─── Vector minimap renderer ──────────────────────────────────────────────────
 //

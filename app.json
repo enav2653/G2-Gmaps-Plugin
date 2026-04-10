@@ -1,7 +1,7 @@
 {
   "name": "G2 Maps",
   "package_id": "com.enav2653.g2maps",
-  "version": "0.2.70",
+  "version": "0.2.71",
   "edition": "202601",
   "description": "Turn-by-turn Google Maps navigation HUD for G2 glasses",
   "author": "Your Name",
