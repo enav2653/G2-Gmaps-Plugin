@@ -39,11 +39,11 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 0
 
-// Minimap tile dimensions — 3×3 grid of 50×50 tiles = 150×150 total
-export const MINIMAP_TILE_W  = 50
-export const MINIMAP_TILE_H  = 50
-const        MINIMAP_COLS    = 3
-const        MINIMAP_ROWS    = 3
+// Minimap tile dimensions — 2×2 grid of 75×75 tiles = 150×150 total
+export const MINIMAP_TILE_W  = 75
+export const MINIMAP_TILE_H  = 75
+const        MINIMAP_COLS    = 2
+const        MINIMAP_ROWS    = 2
 export const MINIMAP_IMG_W   = MINIMAP_TILE_W * MINIMAP_COLS  // 150
 export const MINIMAP_IMG_H   = MINIMAP_TILE_H * MINIMAP_ROWS  // 150
 const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 138 — bottom-aligned
@@ -59,9 +59,8 @@ export const CID = {
   SPEED:  4,
 } as const
 
-// 9 tile IDs for the 3×3 minimap grid (row-major, left-to-right top-to-bottom)
-// IDs 1-4 are taken by other containers; we skip 4 (SPEED) in the sequence.
-export const MAP_TILE_CIDS = [3, 5, 6, 7, 8, 9, 10, 11, 12] as const
+// 4 tile IDs for the 2×2 minimap grid (row-major, left-to-right top-to-bottom)
+export const MAP_TILE_CIDS = [3, 5, 6, 7] as const
 
 // ─── Banner modes ─────────────────────────────────────────────────────────────
 
