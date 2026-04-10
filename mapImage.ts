@@ -33,23 +33,26 @@ function makePngChunk(type: string, data: Uint8Array): Uint8Array {
 }
 
 async function zlibCompress(data: Uint8Array): Promise<Uint8Array> {
-  const cs = new CompressionStream('deflate')
-  const writer = cs.writable.getWriter()
-  writer.write(data as unknown as BufferSource)
-  writer.close()
-  const reader = cs.readable.getReader()
-  const chunks: Uint8Array[] = []
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-  }
-  let total = 0
-  for (const c of chunks) total += c.length
-  const result = new Uint8Array(total)
+  // Use stored blocks (BTYPE=00 — no compression) so the IDAT payload is the
+  // full raw scanline data. CompressionStream shrinks an all-zero image to
+  // ~120 bytes which the firmware rejects; uncompressed keeps it at ~W*H bytes.
+  const LEN = data.length
+  // zlib envelope: 2-byte header + 5-byte stored-block header + data + 4-byte Adler-32
+  const out = new Uint8Array(2 + 5 + LEN + 4)
   let off = 0
-  for (const c of chunks) { result.set(c, off); off += c.length }
-  return result
+  // CMF=0x78 (deflate, 32K window), FLG=0x01  (0x7801 % 31 === 0 ✓)
+  out[off++] = 0x78; out[off++] = 0x01
+  // BFINAL=1, BTYPE=00 (stored)
+  out[off++] = 0x01
+  out[off++] = LEN & 0xff;         out[off++] = (LEN >> 8) & 0xff         // LEN
+  out[off++] = (~LEN) & 0xff;      out[off++] = ((~LEN) >> 8) & 0xff      // NLEN
+  out.set(data, off); off += LEN
+  // Adler-32 (big-endian)
+  let s1 = 1, s2 = 0
+  for (let i = 0; i < LEN; i++) { s1 = (s1 + data[i]) % 65521; s2 = (s2 + s1) % 65521 }
+  out[off++] = (s2 >> 8) & 0xff; out[off++] = s2 & 0xff
+  out[off++] = (s1 >> 8) & 0xff; out[off++] = s1 & 0xff
+  return out
 }
 
 async function encodeGreyscalePng(width: number, height: number, pixels: Uint8Array): Promise<Uint8Array> {
