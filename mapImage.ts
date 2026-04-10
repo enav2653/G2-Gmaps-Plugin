@@ -1,86 +1,62 @@
-// ─── PNG encoder ─────────────────────────────────────────────────────────────
-// Matches visionote's approach: full 8-bit greyscale PNG passed to
-// updateImageRawData, not raw pixel values.
+// ─── 4-bit greyscale BMP encoder ─────────────────────────────────────────────
+//
+// The G2 firmware internally works in 4-bit greyscale and appears to validate
+// image data against the expected BMP file size for the registered container
+// dimensions.  A 4-bit BMP has a fixed, predictable size:
+//   14 (file header) + 40 (DIB header) + 64 (16-entry colour table) + rowStride*H
+// where rowStride = ceil(W/2) rounded up to a 4-byte boundary.
 
-function crc32(data: Uint8Array): number {
-  let crc = 0xffffffff
-  for (let i = 0; i < data.length; i++) {
-    crc ^= data[i]
-    for (let j = 0; j < 8; j++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0
-}
+function encodeGreyscale4BitBmp(width: number, height: number, pixels: Uint8Array): Uint8Array {
+  const rowStride = Math.ceil(Math.ceil(width / 2) / 4) * 4  // padded to 4 bytes
+  const pixelDataSize = rowStride * height
+  const dataOffset    = 14 + 40 + 64   // 118
+  const fileSize      = dataOffset + pixelDataSize
 
-function writeU32BE(arr: Uint8Array, offset: number, value: number): void {
-  arr[offset]     = (value >>> 24) & 0xff
-  arr[offset + 1] = (value >>> 16) & 0xff
-  arr[offset + 2] = (value >>> 8)  & 0xff
-  arr[offset + 3] = value & 0xff
-}
-
-function makePngChunk(type: string, data: Uint8Array): Uint8Array {
-  const chunk = new Uint8Array(4 + 4 + data.length + 4)
-  writeU32BE(chunk, 0, data.length)
-  for (let i = 0; i < 4; i++) chunk[4 + i] = type.charCodeAt(i)
-  chunk.set(data, 8)
-  const crcData = new Uint8Array(4 + data.length)
-  for (let i = 0; i < 4; i++) crcData[i] = type.charCodeAt(i)
-  crcData.set(data, 4)
-  writeU32BE(chunk, 8 + data.length, crc32(crcData))
-  return chunk
-}
-
-async function zlibCompress(data: Uint8Array): Promise<Uint8Array> {
-  const cs = new CompressionStream('deflate')
-  const writer = cs.writable.getWriter()
-  const reader = cs.readable.getReader()
-  writer.write(data as Uint8Array<ArrayBuffer>)
-  writer.close()
-  const chunks: Uint8Array[] = []
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-  }
-  const total = chunks.reduce((n, c) => n + c.length, 0)
-  const out = new Uint8Array(total)
+  const bmp = new Uint8Array(fileSize)
   let off = 0
-  for (const c of chunks) { out.set(c, off); off += c.length }
-  return out
-}
 
-async function encodeGreyscalePng(width: number, height: number, pixels: Uint8Array): Promise<Uint8Array> {
-  const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+  const u16 = (v: number) => { bmp[off++] = v & 0xff; bmp[off++] = (v >> 8) & 0xff }
+  const u32 = (v: number) => { u16(v & 0xffff); u16((v >>> 16) & 0xffff) }
+  const i32 = (v: number) => u32(v >>> 0)
 
-  const ihdrData = new Uint8Array(13)
-  writeU32BE(ihdrData, 0, width)
-  writeU32BE(ihdrData, 4, height)
-  ihdrData[8]  = 8  // bit depth
-  ihdrData[9]  = 0  // color type: greyscale
-  ihdrData[10] = 0  // compression
-  ihdrData[11] = 0  // filter
-  ihdrData[12] = 0  // interlace
-  const ihdr = makePngChunk('IHDR', ihdrData)
+  // ── File header ──────────────────────────────────────────────────────────────
+  bmp[off++] = 0x42; bmp[off++] = 0x4d  // "BM"
+  u32(fileSize)
+  u16(0); u16(0)        // reserved
+  u32(dataOffset)
 
-  // Each row: filter byte 0x00 (None) + pixel data
-  const rawData = new Uint8Array(height * (1 + width))
+  // ── BITMAPINFOHEADER ─────────────────────────────────────────────────────────
+  u32(40)               // header size
+  i32(width)
+  i32(-height)          // negative → top-down row order
+  u16(1)                // colour planes
+  u16(4)                // bits per pixel
+  u32(0)                // compression (BI_RGB)
+  u32(pixelDataSize)
+  i32(0); i32(0)        // pixels per metre (X, Y)
+  u32(16)               // colours used
+  u32(0)                // colours important
+
+  // ── Colour table: 16 grey levels (index i → grey value i×17) ─────────────────
+  for (let i = 0; i < 16; i++) {
+    const v = i * 17    // 0, 17, 34, … 255
+    bmp[off++] = v; bmp[off++] = v; bmp[off++] = v; bmp[off++] = 0  // BGRA
+  }
+
+  // ── Pixel data (top-down, 2 pixels per byte, high nibble = left) ─────────────
   for (let y = 0; y < height; y++) {
-    rawData[y * (1 + width)] = 0
-    rawData.set(pixels.subarray(y * width, (y + 1) * width), y * (1 + width) + 1)
+    let col = 0
+    for (let x = 0; x < width; x += 2) {
+      const hi = pixels[y * width + x]           >> 4   // 8-bit → 4-bit index
+      const lo = (x + 1 < width ? pixels[y * width + x + 1] : 0) >> 4
+      bmp[off++] = (hi << 4) | lo
+      col++
+    }
+    // Row padding
+    while (col < rowStride) { bmp[off++] = 0; col++ }
   }
-  const compressed = await zlibCompress(rawData)
-  const idat = makePngChunk('IDAT', compressed)
-  const iend = makePngChunk('IEND', new Uint8Array(0))
 
-  const png = new Uint8Array(signature.length + ihdr.length + idat.length + iend.length)
-  let off = 0
-  png.set(signature, off); off += signature.length
-  png.set(ihdr,      off); off += ihdr.length
-  png.set(idat,      off); off += idat.length
-  png.set(iend,      off)
-  return png
+  return bmp
 }
 
 // ─── Vector minimap renderer ──────────────────────────────────────────────────
@@ -88,12 +64,13 @@ async function encodeGreyscalePng(width: number, height: number, pixels: Uint8Ar
 // Pure pixel-math renderer — no canvas, no API calls.
 // Draws the route as bright lines on a dark background.
 //
-// Brightness levels:
-//   20  — background
-//   50  — past steps (already driven)
-//   130 — upcoming steps
-//   240 — current step (thick)
-//   255 — position marker / turn point
+// Brightness levels (8-bit, mapped to 4-bit index = value >> 4):
+//    0  — background (index 0 = black)
+//   50  — past steps  (index 3)
+//  130  — upcoming steps (index 8)
+//  240  — current step / thick (index 15)
+//  255  — position marker / turn point (index 15)
+//  180  — corner brackets (index 11)
 
 interface StepCoords {
   polylinePoints: Array<[number, number]>
@@ -103,7 +80,7 @@ interface StepCoords {
   endLng: number
 }
 
-export async function renderMinimapPng(
+export function renderMinimapBmp(
   lat: number,
   lng: number,
   steps: StepCoords[],
@@ -111,10 +88,9 @@ export async function renderMinimapPng(
   w: number,
   h: number,
   zoom: number,
-): Promise<number[]> {
+): number[] {
   const METERS_PER_DEG = 111_320
   const cosLat = Math.cos(lat * Math.PI / 180)
-  // metres per pixel at this zoom level and latitude
   const mpp = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
   const cx = w / 2
   const cy = h / 2
@@ -143,7 +119,6 @@ export async function renderMinimapPng(
     for (;;) {
       setPixel(x0, y0, v)
       if (thick) {
-        // Thicken perpendicular to dominant direction
         if (dx >= dy) { setPixel(x0, y0 + 1, v); setPixel(x0, y0 - 1, v) }
         else          { setPixel(x0 + 1, y0, v); setPixel(x0 - 1, y0, v) }
       }
@@ -162,7 +137,6 @@ export async function renderMinimapPng(
     const v       = past ? 50 : current ? 240 : 130
     const thick   = current
 
-    // Use decoded polyline if available, else fall back to start→end straight line
     const pts: Array<[number, number]> = s.polylinePoints.length >= 2
       ? s.polylinePoints
       : (s.startLat || s.startLng) && (s.endLat || s.endLng)
@@ -195,9 +169,7 @@ export async function renderMinimapPng(
   setPixel(posX + 1, posY + 1, 200); setPixel(posX - 1, posY + 1, 200)
   setPixel(posX + 1, posY - 1, 200); setPixel(posX - 1, posY - 1, 200)
 
-  // Corner brackets — L-shaped marks at all four corners.
-  // Ensures the PNG always has enough non-zero pixels to compress above the
-  // firmware's minimum size floor, regardless of route content.
+  // Corner brackets — L-shaped marks matching the Even Realities nav app style
   const CL = 12  // arm length in pixels
   const CV = 180 // brightness
   for (let i = 0; i < CL; i++) {
@@ -207,6 +179,5 @@ export async function renderMinimapPng(
     setPixel(w - 1 - i, h - 1,     CV); setPixel(w - 1,     h - 1 - i, CV)  // bottom-right
   }
 
-  const pngBytes = await encodeGreyscalePng(w, h, pixels)
-  return Array.from(pngBytes)
+  return Array.from(encodeGreyscale4BitBmp(w, h, pixels))
 }

@@ -12,7 +12,7 @@ import {
 import { getRoute, RouteStep } from './maps'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
-import { renderMinimapPng } from './mapImage'
+import { renderMinimapBmp } from './mapImage'
 import {
   buildEventContainer,
   buildBannerContainer,
@@ -490,16 +490,16 @@ async function refreshMinimap() {
 
   minimapRefreshing = true
   try {
-    const pngData = await renderMinimapPng(
+    const bmpData = renderMinimapBmp(
       currentLat, currentLng, steps, effectiveStepIdx(),
       MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
     )
     const result = await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   CID.MAP,
       containerName: 'minimap',
-      imageData:     pngData,
+      imageData:     bmpData,
     }))
-    reportStatus(`minimap: ${pngData.length}B → ${JSON.stringify(result)}`)
+    reportStatus(`minimap: ${bmpData.length}B → ${JSON.stringify(result)}`)
   } catch (e) {
     reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
