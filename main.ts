@@ -63,6 +63,10 @@ let prevPollLat  = 0
 let prevPollLng  = 0
 let prevPollTime = 0
 
+// Heading — GPS bearing (when moving) or device compass (when slow/stationary)
+let gpsHeadingDeg:    number | null = null
+let deviceHeadingDeg: number | null = null
+
 // Reroute guard
 let rerouteInProgress = false
 
@@ -218,16 +222,21 @@ async function pollLocation() {
 
   const now = Date.now()
 
-  // Speed — prefer GPS-reported m/s from Tasker (%LOCSPEED); fall back to position delta
-  if (loc.speedMs != null) {
-    speedMph = loc.speedMs * 2.23694
-  } else if (prevPollTime > 0 && (prevPollLat || prevPollLng)) {
+  // Speed + GPS bearing from position delta (always computed when we have a prev fix)
+  if (prevPollTime > 0 && (prevPollLat || prevPollLng)) {
     const distM = haversine(prevPollLat, prevPollLng, loc.lat, loc.lng)
-    const dtSec = (now - prevPollTime) / 1000
-    if (dtSec >= 0.1 && dtSec < 30) {
-      const sample = distM / dtSec * 2.23694
-      if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
+    if (loc.speedMs != null) {
+      speedMph = loc.speedMs * 2.23694
+    } else {
+      const dtSec = (now - prevPollTime) / 1000
+      if (dtSec >= 0.1 && dtSec < 30) {
+        const sample = distM / dtSec * 2.23694
+        if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
+      }
     }
+    if (distM > 5) gpsHeadingDeg = bearing(prevPollLat, prevPollLng, loc.lat, loc.lng)
+  } else if (loc.speedMs != null) {
+    speedMph = loc.speedMs * 2.23694
   }
   prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
 
@@ -330,6 +339,26 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
   const a    = Math.sin(dLat/2)**2 +
     Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+}
+
+/** Bearing from (lat1, lng1) → (lat2, lng2), 0° = north, clockwise. */
+function bearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const phi1 = lat1 * Math.PI / 180
+  const phi2 = lat2 * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const x = Math.sin(dLng) * Math.cos(phi2)
+  const y = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLng)
+  return ((Math.atan2(x, y) * 180 / Math.PI) + 360) % 360
+}
+
+/**
+ * Active map heading: GPS bearing when speed ≥ 5 mph, device compass otherwise.
+ * Returns 0 (north-up) when neither source is available.
+ */
+function activeHeadingDeg(): number {
+  if (speedMph >= 5 && gpsHeadingDeg !== null) return gpsHeadingDeg
+  if (deviceHeadingDeg !== null) return deviceHeadingDeg
+  return 0
 }
 
 /** Distance from a point to a line segment, in metres. */
@@ -501,6 +530,7 @@ async function refreshMinimap() {
       currentLat, currentLng, steps, effectiveStepIdx(),
       MINIMAP_IMG_W, MINIMAP_IMG_H, MINIMAP_TILE_W, MINIMAP_TILE_H, minimapZoom(),
       getCachedRoads(),
+      activeHeadingDeg(),
     )
     const results = await Promise.all(tiles.map((tileData, i) =>
       bridge.updateImageRawData(new ImageRawDataUpdate({
@@ -523,10 +553,12 @@ function startGPS() {
   if (!navigator.geolocation) return
   watchId = navigator.geolocation.watchPosition(
     async (pos) => {
-      const { latitude: lat, longitude: lng, speed } = pos.coords
+      const { latitude: lat, longitude: lng, speed, heading } = pos.coords
       currentLat = lat
       currentLng = lng
       speedMph   = speed != null ? speed * 2.23694 : speedMph
+      if (heading != null && !isNaN(heading) && speed != null && speed > 2)
+        gpsHeadingDeg = heading
 
       // Fetch speed limit in parallel — cached by place ID so usually instant
       const newLimit   = await getSpeedLimitMph(lat, lng)
@@ -573,9 +605,29 @@ function stopGPS() {
   }
 }
 
-// ─── IMU — heading tracking ───────────────────────────────────────────────────
-// Disabled: headingDeg is not currently used in any display output.
-// Re-enable when minimap heading rotation is implemented.
+// ─── Compass heading ──────────────────────────────────────────────────────────
+//
+// DeviceOrientationEvent.alpha gives absolute compass heading (0° = north,
+// clockwise) on Android WebViews and iOS (after permission grant).
+// Used as fallback when GPS speed is too low for a reliable bearing.
+
+function startCompass() {
+  const onOrientation = (e: DeviceOrientationEvent) => {
+    if (e.alpha !== null) deviceHeadingDeg = e.alpha
+  }
+  // deviceorientationabsolute is always compass-referenced on Android
+  window.addEventListener('deviceorientationabsolute', onOrientation as EventListener, true)
+  // deviceorientation as fallback (may be relative on some browsers)
+  window.addEventListener('deviceorientation', onOrientation as EventListener, true)
+
+  // iOS 13+ requires explicit permission
+  const DOE = DeviceOrientationEvent as any
+  if (typeof DOE.requestPermission === 'function') {
+    DOE.requestPermission()
+      .then((s: string) => { if (s !== 'granted') reportStatus('compass: iOS permission denied') })
+      .catch(() => {})
+  }
+}
 
 // ─── Touchpad input ───────────────────────────────────────────────────────────
 
@@ -782,6 +834,7 @@ async function init() {
   bridge = await waitForEvenAppBridge()
 
   setupInput()
+  startCompass()
 
   bridge.onEvenHubEvent(event => {
     const sys = event.sysEvent

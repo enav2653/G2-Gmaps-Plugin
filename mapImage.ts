@@ -104,19 +104,22 @@ function renderPixels(
   h: number,
   zoom: number,
   roads: Array<Array<[number, number]>> = [],
+  headingDeg = 0,
 ): Uint8Array {
   const METERS_PER_DEG = 111_320
   const cosLat = Math.cos(lat * Math.PI / 180)
   const mpp = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
   const cx = w / 2
   const cy = h / 2
+  const cosH = Math.cos(headingDeg * Math.PI / 180)
+  const sinH = Math.sin(headingDeg * Math.PI / 180)
 
   const pixels = new Uint8Array(w * h).fill(0)
 
   function toPixel(plat: number, plng: number): [number, number] {
-    const px = cx + (plng - lng) * cosLat * METERS_PER_DEG / mpp
-    const py = cy - (plat - lat) * METERS_PER_DEG / mpp
-    return [Math.round(px), Math.round(py)]
+    const rx = (plng - lng) * cosLat * METERS_PER_DEG / mpp
+    const ry = (plat - lat) * METERS_PER_DEG / mpp
+    return [Math.round(cx + rx * cosH - ry * sinH), Math.round(cy - (rx * sinH + ry * cosH))]
   }
 
   function setPixel(x: number, y: number, v: number) {
@@ -217,19 +220,19 @@ function renderPixels(
 
   // ── Compass labels — N/S/E/W placed on the largest inscribed circle ───────────
   //
-  // The circle has radius r = min(w,h)/2. Each glyph (5×5) is positioned so
-  // its outermost edge (the face furthest from centre) touches the circle.
+  // Glyphs rotate with the map so they always show true cardinal directions.
+  // Glyph centers are placed at radius (r − GLYPH_H/2) so the outer edge
+  // stays inside the inscribed circle at any heading.
   {
     const r  = Math.min(w, h) / 2
-    const gc = 200  // glyph brightness
-    // N — top edge of glyph at y = cy − r
-    drawGlyph('N', Math.round(cx - GLYPH_W / 2), Math.round(cy - r),                  gc)
-    // S — bottom edge of glyph at y = cy + r − 1
-    drawGlyph('S', Math.round(cx - GLYPH_W / 2), Math.round(cy + r) - GLYPH_H,        gc)
-    // E — right edge of glyph at x = cx + r − 1
-    drawGlyph('E', Math.round(cx + r) - GLYPH_W, Math.round(cy - GLYPH_H / 2),        gc)
-    // W — left edge of glyph at x = cx − r
-    drawGlyph('W', Math.round(cx - r),            Math.round(cy - GLYPH_H / 2),        gc)
+    const gr = r - GLYPH_H / 2  // glyph-centre radius
+    const gc = 200
+    for (const [label, cardDeg] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]] as [string, number][]) {
+      const a  = (cardDeg - headingDeg) * Math.PI / 180
+      const lx = Math.round(cx + gr * Math.sin(a) - GLYPH_W / 2)
+      const ly = Math.round(cy - gr * Math.cos(a) - GLYPH_H / 2)
+      drawGlyph(label, lx, ly, gc)
+    }
   }
 
   return pixels
@@ -239,16 +242,18 @@ export function renderMinimapBmp(
   lat: number, lng: number, steps: StepCoords[], stepIdx: number,
   w: number, h: number, zoom: number,
   roads: Array<Array<[number, number]>> = [],
+  headingDeg = 0,
 ): number[] {
-  return Array.from(encodeGreyscale4BitBmp(w, h, renderPixels(lat, lng, steps, stepIdx, w, h, zoom, roads)))
+  return Array.from(encodeGreyscale4BitBmp(w, h, renderPixels(lat, lng, steps, stepIdx, w, h, zoom, roads, headingDeg)))
 }
 
 export function renderMinimapBmpTiles(
   lat: number, lng: number, steps: StepCoords[], stepIdx: number,
   totalW: number, totalH: number, tileW: number, tileH: number, zoom: number,
   roads: Array<Array<[number, number]>> = [],
+  headingDeg = 0,
 ): number[][] {
-  const pixels = renderPixels(lat, lng, steps, stepIdx, totalW, totalH, zoom, roads)
+  const pixels = renderPixels(lat, lng, steps, stepIdx, totalW, totalH, zoom, roads, headingDeg)
   const cols = totalW / tileW
   const rows = totalH / tileH
   const tiles: number[][] = []
