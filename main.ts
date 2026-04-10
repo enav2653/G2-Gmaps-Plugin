@@ -12,11 +12,15 @@ import {
 import { getRoute, RouteStep } from './maps'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
-import { renderMinimapPng } from './mapImage'
+import { renderMinimapBmpTiles } from './mapImage'
+import { getCachedRoads, refreshRoads } from './roadData'
 import {
   buildEventContainer,
   buildBannerContainer,
-  buildMinimapImageContainer,
+  buildMinimapImageContainers,
+  MAP_TILE_CIDS,
+  MINIMAP_TILE_W,
+  MINIMAP_TILE_H,
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
@@ -54,11 +58,10 @@ let androidPollTimer: ReturnType<typeof setInterval> | null = null
 let previewStepIdx:   number | null = null
 let previewResetTimer: ReturnType<typeof setTimeout> | null = null
 
-// Speed and heading from consecutive position fixes
+// Speed calculation from consecutive position fixes
 let prevPollLat  = 0
 let prevPollLng  = 0
 let prevPollTime = 0
-let headingDeg   = 0   // degrees clockwise from north, smoothed EMA
 
 // Reroute guard
 let rerouteInProgress = false
@@ -224,11 +227,6 @@ async function pollLocation() {
     if (dtSec >= 0.1 && dtSec < 30) {
       const sample = distM / dtSec * 2.23694
       if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
-    }
-    // Heading — only update when we've moved enough to get a reliable bearing
-    if (distM > 5) {
-      const bearing = gpsHeading(prevPollLat, prevPollLng, loc.lat, loc.lng)
-      headingDeg = headingDeg * 0.6 + bearing * 0.4   // smooth EMA
     }
   }
   prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
@@ -439,9 +437,9 @@ async function buildPage() {
     const speedContainer = buildSpeedContainer(speedContent, settings)
     if (speedContainer) textContainers.push(speedContainer)
 
-    const imageContainers: ImageContainerProperty[] = []
-    const mapImgContainer = buildMinimapImageContainer(settings)
-    if (mapImgContainer) imageContainers.push(mapImgContainer)
+    const imageContainers: ImageContainerProperty[] = [
+      ...buildMinimapImageContainers(settings),
+    ]
 
     const containerData = {
       containerTotalNum: textContainers.length + imageContainers.length,
@@ -464,8 +462,6 @@ async function buildPage() {
       }
     }
 
-    // Populate image container right after page create/rebuild
-    refreshMinimap()
   } finally {
     buildingPage = false
   }
@@ -502,36 +498,30 @@ async function refreshSpeed() {
 }
 
 async function refreshMinimap() {
-  if (!settings.minimap.visible) {
-    reportStatus('minimap: hidden in settings')
-    return
-  }
-  if (!pageCreated) {
-    reportStatus('minimap: page not yet created')
-    return
-  }
-  if (!currentLat && !currentLng) {
-    reportStatus('minimap: no GPS fix yet')
-    return
-  }
-  if (minimapRefreshing) return   // silent skip when busy
+  if (!settings.minimap.visible || !pageCreated) return
+  if (!currentLat && !currentLng) return
+  if (minimapRefreshing) return
 
   minimapRefreshing = true
-  reportStatus(`minimap: rendering (heading=${headingDeg.toFixed(0)}°)`)
   try {
-    const pngData = await renderMinimapPng(
+    // Kick off a background road-data refresh (non-blocking; uses cached data this frame)
+    refreshRoads(currentLat, currentLng, minimapZoom(), MINIMAP_IMG_W, MINIMAP_IMG_H).catch(() => {})
+
+    const tiles = renderMinimapBmpTiles(
       currentLat, currentLng, steps, effectiveStepIdx(),
-      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(), headingDeg,
-      reportStatus,
+      MINIMAP_IMG_W, MINIMAP_IMG_H, MINIMAP_TILE_W, MINIMAP_TILE_H, minimapZoom(),
+      getCachedRoads(),
     )
-    const imgResult = await bridge.updateImageRawData(new ImageRawDataUpdate({
-      containerID:   CID.MAP,
-      containerName: 'minimap',
-      imageData:     pngData,
-    }))
-    reportStatus(`minimap: sent ${pngData.length} bytes, result=${JSON.stringify(imgResult)}`)
+    const results = await Promise.all(tiles.map((tileData, i) =>
+      bridge.updateImageRawData(new ImageRawDataUpdate({
+        containerID:   MAP_TILE_CIDS[i],
+        containerName: `minimap_${i % 2}_${Math.floor(i / 2)}`,
+        imageData:     tileData,
+      }))
+    ))
+    reportStatus(`minimap: ${tiles[0].length}B×${tiles.length} → ${JSON.stringify(results)}`)
   } catch (e) {
-    reportStatus(`minimap error: ${e instanceof Error ? e.message : String(e)}`)
+    reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
     minimapRefreshing = false
   }
@@ -812,17 +802,6 @@ async function init() {
       refreshMinimap()
     }
   })
-
-  // Probe GPS now so minimap has coordinates before the first buildPage.
-  // Also caches activeLocationProvider for the navigation poll loop.
-  try {
-    const loc = await tryBridgeLocation()
-    if (loc) {
-      currentLat = loc.lat
-      currentLng = loc.lng
-      reportStatus(`init GPS: ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`)
-    }
-  } catch { /* GPS probe failure is non-fatal */ }
 
   await buildPage()
 

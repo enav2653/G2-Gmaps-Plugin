@@ -37,13 +37,17 @@ const BOTTOM_Y  = 196
 const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 
 // Minimap left padding in px
-const MAP_PAD_L = 4
+const MAP_PAD_L = 0
 
-// Minimap image dimensions — 3:4 portrait ratio, anchored to bottom-left
-// The top edge sits at y=168, extending into the otherwise-empty clear zone.
-export const MINIMAP_IMG_W = 90
-export const MINIMAP_IMG_H = 120
-const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H   // 168
+// Minimap tile dimensions — 2×2 grid of 62×62 tiles = 124×124 total
+// (125 can't be halved evenly; 124 is the nearest clean split)
+export const MINIMAP_TILE_W  = 62
+export const MINIMAP_TILE_H  = 62
+const        MINIMAP_COLS    = 2
+const        MINIMAP_ROWS    = 2
+export const MINIMAP_IMG_W   = MINIMAP_TILE_W * MINIMAP_COLS  // 124
+export const MINIMAP_IMG_H   = MINIMAP_TILE_H * MINIMAP_ROWS  // 124
+const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-aligned
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
@@ -53,9 +57,11 @@ const SPD_RIGHT_MARGIN = 8
 export const CID = {
   EVENT:  1,
   BANNER: 2,
-  MAP:    3,
   SPEED:  4,
 } as const
+
+// 4 tile IDs for the 2×2 minimap grid (row-major, left-to-right top-to-bottom)
+export const MAP_TILE_CIDS = [3, 5, 6, 7] as const
 
 // ─── Banner modes ─────────────────────────────────────────────────────────────
 
@@ -164,7 +170,7 @@ export function buildMinimapTextContainer(
   if (!settings.minimap.visible || !content) return null
 
   return new TextContainerProperty({
-    containerID:   CID.MAP,
+    containerID:   MAP_TILE_CIDS[0],
     containerName: 'minimap',
     xPosition:     MAP_PAD_L,
     yPosition:     BOTTOM_Y,
@@ -178,18 +184,22 @@ export function buildMinimapTextContainer(
   })
 }
 
-/** Minimap image container — bottom-left, 3:4 portrait. Returns null if hidden. */
-export function buildMinimapImageContainer(
+/** Minimap image containers — 3×3 grid of 50×50 tiles. Returns [] if hidden. */
+export function buildMinimapImageContainers(
   settings: HudSettings,
-): ImageContainerProperty | null {
-  if (!settings.minimap.visible) return null
-  return new ImageContainerProperty({
-    containerID:   CID.MAP,
-    containerName: 'minimap',
-    xPosition:     MAP_PAD_L,
-    yPosition:     MINIMAP_Y,
-    width:         MINIMAP_IMG_W,
-    height:        MINIMAP_IMG_H,
+): ImageContainerProperty[] {
+  if (!settings.minimap.visible) return []
+  return Array.from({ length: MINIMAP_COLS * MINIMAP_ROWS }, (_, idx) => {
+    const col = idx % MINIMAP_COLS
+    const row = Math.floor(idx / MINIMAP_COLS)
+    return new ImageContainerProperty({
+      containerID:   MAP_TILE_CIDS[idx],
+      containerName: `minimap_${col}_${row}`,
+      xPosition:     MAP_PAD_L + col * MINIMAP_TILE_W,
+      yPosition:     MINIMAP_Y + row * MINIMAP_TILE_H,
+      width:         MINIMAP_TILE_W,
+      height:        MINIMAP_TILE_H,
+    })
   })
 }
 
