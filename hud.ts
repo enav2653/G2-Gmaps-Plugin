@@ -39,8 +39,8 @@ const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 // Minimap left padding in px
 const MAP_PAD_L = 0
 
-// Minimap image dimensions — documented spec from Even Realities demo app
-export const MINIMAP_IMG_W = 576
+// Minimap image dimensions — SDK max width × demo-documented height
+export const MINIMAP_IMG_W = 288
 export const MINIMAP_IMG_H = 136
 const MINIMAP_Y = CANVAS_H - MINIMAP_IMG_H  // 152
 
