@@ -780,62 +780,38 @@ function stopGPS() {
 
 // ─── Compass heading ──────────────────────────────────────────────────────────
 //
-// Primary: AbsoluteOrientationSensor (Generic Sensor API) — backed by Android's
-// TYPE_ROTATION_VECTOR fusion (accel + gyro + mag), the same pipeline as the
-// Android Fused Orientation Provider. Returns quaternion → tilt-compensated heading.
-// Fallback: DeviceOrientationEvent.alpha (used when sensor API unavailable).
-
-/**
- * Extract tilt-compensated compass heading (0°=N, clockwise) from an
- * AbsoluteOrientationSensor quaternion [qx, qy, qz, qw].
- *
- * Works for any phone orientation by blending two reference axes:
- *   flat    → heading of device Y (top of phone) in world horizontal plane
- *   upright → heading of device −Z (back camera) in world horizontal plane
- * The blend is continuous, driven by how vertical the Y axis has become.
- */
-function quaternionToHeading(qx: number, qy: number, qz: number, qw: number): number {
-  // World-frame East/North of device Y axis (top of phone)
-  const yEast  = 2 * (qx*qy - qw*qz)
-  const yNorth = 1 - 2 * (qx*qx + qz*qz)
-  const yUp    = 2 * (qy*qz + qw*qx)   // 1 = phone flat, 0 = phone upright
-
-  // World-frame East/North of device −Z axis (back camera / forward when upright)
-  const nzEast  = -(2 * (qx*qz + qw*qy))
-  const nzNorth = -(2 * (qy*qz - qw*qx))
-
-  // Continuously blend: flatness=1 → Y formula, flatness=0 → −Z formula
-  const flatness = Math.abs(yUp)
-  const hY  = Math.atan2(yEast,  yNorth)
-  const hNZ = Math.atan2(nzEast, nzNorth)
-
-  // Circular average handles 0°/360° wrap cleanly
-  const sinH = flatness * Math.sin(hY)  + (1 - flatness) * Math.sin(hNZ)
-  const cosH = flatness * Math.cos(hY)  + (1 - flatness) * Math.cos(hNZ)
-  return ((Math.atan2(sinH, cosH) * 180 / Math.PI) + 360) % 360
-}
+// DeviceOrientationEvent.alpha gives absolute compass heading (0°=N, clockwise)
+// on Android WebViews. Used when speed < 5 mph; GPS position-delta heading is
+// used at speed. A GPS-learned bias offset corrects the magnetometer over time.
 
 function startCompass() {
-  const ALPHA = 0.15
-  let compassFired = false        // diagnostic: log first event
-  let lastRefreshHeading = -1     // for compass-driven minimap refresh
+  // Circular EMA: smooth sin+cos independently, recover angle with atan2.
+  // Handles 0°/360° wrap correctly. alpha=0.1 matches original 0.2.78 behaviour.
+  const ALPHA = 0.1
+  let compassFired      = false
+  let lastRefreshHeading = -1
 
-  function applyCompassReading(rawDeg: number) {
-    const rad = rawDeg * Math.PI / 180
+  const onOrientation = (e: DeviceOrientationEvent) => {
+    if (e.alpha === null) return
+    const rad = e.alpha * Math.PI / 180
     deviceHeadingSin = ALPHA * Math.sin(rad) + (1 - ALPHA) * deviceHeadingSin
     deviceHeadingCos = ALPHA * Math.cos(rad) + (1 - ALPHA) * deviceHeadingCos
     deviceHeadingDeg = ((Math.atan2(deviceHeadingSin, deviceHeadingCos) * 180 / Math.PI) + 360) % 360
 
     if (!compassFired) {
       compassFired = true
-      reportStatus(`compass: first event alpha=${rawDeg.toFixed(1)}°`)
+      reportStatus(`compass: first event alpha=${e.alpha.toFixed(1)}°`)
     }
   }
+  // deviceorientationabsolute is always compass-referenced on Android
+  window.addEventListener('deviceorientationabsolute', onOrientation as EventListener, true)
+  // deviceorientation as fallback (may be relative on some browsers)
+  window.addEventListener('deviceorientation',         onOrientation as EventListener, true)
 
-  // Compass-driven minimap refresh — update the map whenever heading changes ≥3°,
-  // independent of the GPS poll rate.  Capped at ~5 Hz by the 200 ms interval.
+  // Compass-driven minimap refresh — update the map whenever heading changes ≥ 3°,
+  // independently of the GPS poll rate. Capped at ~5 Hz by the 200 ms interval.
   setInterval(() => {
-    if (deviceHeadingDeg === null || speedMph >= 5) return  // GPS heading drives at speed
+    if (deviceHeadingDeg === null || speedMph >= 5) return
     let diff = Math.abs(deviceHeadingDeg - lastRefreshHeading)
     if (diff > 180) diff = 360 - diff
     if (diff >= 3) {
@@ -844,54 +820,7 @@ function startCompass() {
     }
   }, 200)
 
-  function startDeviceOrientationFallback() {
-    const onOrientation = (e: DeviceOrientationEvent) => {
-      if (e.alpha === null) return
-      applyCompassReading(e.alpha)
-      if (calActive && e.beta !== null && e.gamma !== null)
-        updateCalibration(e.alpha, e.beta, e.gamma)
-    }
-    // deviceorientationabsolute is always compass-referenced on Android
-    window.addEventListener('deviceorientationabsolute', onOrientation as EventListener, true)
-    // deviceorientation as fallback (may be relative on some browsers)
-    window.addEventListener('deviceorientation',         onOrientation as EventListener, true)
-  }
-
-  // Try AbsoluteOrientationSensor first (Chrome 67+, Generic Sensor API)
-  if (typeof (window as any).AbsoluteOrientationSensor !== 'undefined') {
-    Promise.all([
-      navigator.permissions.query({ name: 'accelerometer' as PermissionName }),
-      navigator.permissions.query({ name: 'gyroscope'     as PermissionName }),
-      navigator.permissions.query({ name: 'magnetometer'  as PermissionName }),
-    ]).then(results => {
-      if (results.some(r => r.state === 'denied')) {
-        startDeviceOrientationFallback()
-        return
-      }
-      try {
-        const sensor = new (window as any).AbsoluteOrientationSensor({ frequency: 30 })
-        sensor.addEventListener('reading', () => {
-          const [qx, qy, qz, qw] = sensor.quaternion as [number, number, number, number]
-          applyCompassReading(quaternionToHeading(qx, qy, qz, qw))
-          if (calActive) {
-            // Extract Euler-like angles from quaternion for calibration coverage tracking
-            const alpha = quaternionToHeading(qx, qy, qz, qw)
-            const beta  = Math.asin(Math.max(-1, Math.min(1, 2*(qw*qx - qy*qz)))) * 180/Math.PI
-            const gamma = Math.atan2(2*(qw*qy + qx*qz), 1-2*(qy*qy+qz*qz)) * 180/Math.PI
-            updateCalibration(alpha, beta, gamma)
-          }
-        })
-        sensor.addEventListener('error', () => startDeviceOrientationFallback())
-        sensor.start()
-      } catch {
-        startDeviceOrientationFallback()
-      }
-    }).catch(() => startDeviceOrientationFallback())
-  } else {
-    startDeviceOrientationFallback()
-  }
-
-  // iOS 13+ requires explicit permission for DeviceOrientationEvent (fallback path)
+  // iOS 13+ requires explicit permission
   const DOE = DeviceOrientationEvent as any
   if (typeof DOE.requestPermission === 'function') {
     DOE.requestPermission()
