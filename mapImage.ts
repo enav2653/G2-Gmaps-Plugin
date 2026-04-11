@@ -335,16 +335,16 @@ export function renderMinimapBmpTiles(
 // Draws three vertical progress bars: rotation (α), tilt (β), roll (γ).
 // Each bar fills bottom-up; a checkmark appears below when that axis is done.
 
-/** Renders a compass calibration progress graphic into the minimap tiles.
+/** Renders a compass calibration progress graphic as a single BMP.
  *  rotPct / tiltPct / rollPct are each 0–1. */
-export function renderCalibrationBmpTiles(
+function renderCalibrationPixels(
   rotPct: number, tiltPct: number, rollPct: number,
-  totalW: number, totalH: number, tileW: number, tileH: number,
-): number[][] {
-  const pixels = new Uint8Array(totalW * totalH).fill(3)  // dark background
+  w: number, h: number,
+): Uint8Array {
+  const pixels = new Uint8Array(w * h).fill(3)  // dark background
 
   function px(x: number, y: number, v: number) {
-    if (x >= 0 && x < totalW && y >= 0 && y < totalH) pixels[y * totalW + x] = v
+    if (x >= 0 && x < w && y >= 0 && y < h) pixels[y * w + x] = v
   }
   function rect(x0: number, y0: number, x1: number, y1: number, v: number) {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) px(x, y, v)
@@ -353,23 +353,22 @@ export function renderCalibrationBmpTiles(
     for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) if (m[r][c]) px(ox+c, oy+r, v)
   }
 
-  // 9×8 pixel icons for the three axes
-  const ICO_ROT: number[][] = [          // circular arrow (clockwise)
+  const ICO_ROT: number[][] = [
     [0,0,1,1,1,0,0,0,0], [0,1,0,0,0,1,0,0,0], [0,0,0,0,0,1,0,0,0],
     [0,0,0,0,1,1,1,0,0], [0,1,0,0,0,0,0,0,0], [0,0,1,1,1,0,0,0,0],
     [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
   ]
-  const ICO_TILT: number[][] = [         // up / down arrows
+  const ICO_TILT: number[][] = [
     [0,0,0,1,0,0,0,0,0], [0,0,1,1,1,0,0,0,0], [0,0,0,1,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0], [0,0,0,1,0,0,0,0,0], [0,0,1,1,1,0,0,0,0],
     [0,0,0,1,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
   ]
-  const ICO_ROLL: number[][] = [         // left / right arrows
+  const ICO_ROLL: number[][] = [
     [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0], [0,1,0,0,0,0,0,1,0],
     [1,1,1,0,0,0,1,1,1], [0,1,0,0,0,0,0,1,0], [0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
   ]
-  const ICO_CHECK: number[][] = [        // checkmark
+  const ICO_CHECK: number[][] = [
     [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,1,0,0,0], [0,0,0,0,1,0,0,0,0],
     [1,0,0,1,0,0,0,0,0], [0,1,1,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
@@ -384,31 +383,29 @@ export function renderCalibrationBmpTiles(
     const bx = BAR_XS[i]
     const p  = Math.min(1, Math.max(0, PCTS[i]))
 
-    icon(ICONS[i], bx + 2, 8, 11)                                    // axis icon
+    icon(ICONS[i], bx + 2, 8, 11)
+    rect(bx, BAR_Y, bx + BAR_W, BAR_Y + BAR_H, 6)
+    rect(bx + 1, BAR_Y + 1, bx + BAR_W - 1, BAR_Y + BAR_H - 1, 2)
 
-    rect(bx, BAR_Y, bx + BAR_W, BAR_Y + BAR_H, 6)                   // bar border
-    rect(bx + 1, BAR_Y + 1, bx + BAR_W - 1, BAR_Y + BAR_H - 1, 2)  // bar background
-
-    const fillH = Math.round(BAR_H * p)                               // bar fill
+    const fillH = Math.round(BAR_H * p)
     if (fillH > 0)
       rect(bx + 1, BAR_Y + BAR_H - fillH, bx + BAR_W - 1, BAR_Y + BAR_H - 1,
            p >= 1 ? 15 : 11)
 
-    if (p >= 1) icon(ICO_CHECK, bx + 2, BAR_Y + BAR_H + 4, 15)      // done: ✓
-    else         rect(bx + 5, BAR_Y + BAR_H + 5, bx + 9, BAR_Y + BAR_H + 8, 5) // pending dot
+    if (p >= 1) icon(ICO_CHECK, bx + 2, BAR_Y + BAR_H + 4, 15)
+    else         rect(bx + 5, BAR_Y + BAR_H + 5, bx + 9, BAR_Y + BAR_H + 8, 5)
   }
 
-  // Slice into tiles
-  const cols = totalW / tileW, rows = totalH / tileH
-  const tiles: number[][] = []
-  for (let row = 0; row < rows; row++)
-    for (let col = 0; col < cols; col++) {
-      const sub = new Uint8Array(tileW * tileH)
-      for (let y = 0; y < tileH; y++)
-        for (let x = 0; x < tileW; x++)
-          sub[y * tileW + x] = pixels[(row * tileH + y) * totalW + (col * tileW + x)]
-      tiles.push(Array.from(encodeGreyscale4BitBmp(tileW, tileH, sub)))
-    }
-  return tiles
+  return pixels
+}
+
+/** Renders a compass calibration progress graphic as a single BMP.
+ *  rotPct / tiltPct / rollPct are each 0–1. */
+export function renderCalibrationBmp(
+  rotPct: number, tiltPct: number, rollPct: number,
+  w: number, h: number,
+): number[] {
+  return Array.from(encodeGreyscale4BitBmp(w, h,
+    renderCalibrationPixels(rotPct, tiltPct, rollPct, w, h)))
 }
 
