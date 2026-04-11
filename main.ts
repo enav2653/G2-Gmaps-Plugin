@@ -52,7 +52,7 @@ let buildingPage    = false  // serialises concurrent buildPage calls
 let buildPagePending = false  // a call arrived while buildingPage was true
 
 // Cached reference to whichever Android/bridge location method worked
-let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number } | null>) | null = null
+let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number; headingDeg?: number } | null>) | null = null
 let androidPollTimer: ReturnType<typeof setInterval> | null = null
 
 // Manual step preview (swipe) — null means track navigation step
@@ -81,14 +81,17 @@ let rerouteInProgress = false
 // Once a working provider is found it is cached in activeLocationProvider
 // so subsequent polls don't re-scan.
 
-function parseLocation(r: any): { lat: number; lng: number; speedMs?: number } | null {
+function parseLocation(r: any): { lat: number; lng: number; speedMs?: number; headingDeg?: number } | null {
   if (r == null) return null
   if (typeof r === 'string') {
     try { r = JSON.parse(r) } catch { return null }
   }
   const speedMs = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
-  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs }
-  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs }
+  // Accept heading/bearing/course; Tasker %LOCBEAR returns -1 when unavailable
+  const rawHdg = r.heading ?? r.bearing ?? r.course
+  const headingDeg = rawHdg != null && !isNaN(+rawHdg) && +rawHdg >= 0 ? +rawHdg : undefined
+  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs, headingDeg }
+  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs, headingDeg }
   return null
 }
 
@@ -238,10 +241,14 @@ async function pollLocation() {
         if (sample < 200) speedMph = speedMph * 0.7 + sample * 0.3
       }
     }
-    if (distM > 5) gpsHeadingDeg = bearing(prevPollLat, prevPollLng, loc.lat, loc.lng)
+    // Position-delta bearing as fallback when Tasker doesn't supply heading
+    if (loc.headingDeg == null && distM > 5)
+      gpsHeadingDeg = bearing(prevPollLat, prevPollLng, loc.lat, loc.lng)
   } else if (loc.speedMs != null) {
     speedMph = loc.speedMs * 2.23694
   }
+  // Tasker %LOCBEAR — GPS hardware heading, accurate at all speeds
+  if (loc.headingDeg != null) gpsHeadingDeg = loc.headingDeg
   prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
 
   currentLat = loc.lat
@@ -639,8 +646,9 @@ function stopGPS() {
 function startCompass() {
   // Circular EMA: smooth sin + cos independently, recover angle with atan2.
   // This handles the 0°/360° wrap correctly (e.g. 350° + 10° → 0°, not 180°).
-  // alpha=0.1 → ~10-frame lag at typical 10 Hz sensor rate — smooth but responsive.
-  const ALPHA = 0.1
+  // alpha=0.15 → ~7-frame lag at typical 10 Hz sensor rate — smoother than raw,
+  // faster than before. Used only as fallback when Tasker heading is unavailable.
+  const ALPHA = 0.15
   const onOrientation = (e: DeviceOrientationEvent) => {
     if (e.alpha === null) return
     const rad = e.alpha * Math.PI / 180

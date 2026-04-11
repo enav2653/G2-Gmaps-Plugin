@@ -243,44 +243,56 @@ function renderPixels(
     const r  = Math.min(w, h) / 2
     const gr = r - GLYPH_H / 2  // glyph-centre radius
     const gc = 200
+    const pad = 2  // dark badge padding around each glyph
     for (const [label, cardDeg] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]] as [string, number][]) {
       const a  = (cardDeg - headingDeg) * Math.PI / 180
       const lx = Math.round(cx + gr * Math.sin(a) - GLYPH_W / 2)
       const ly = Math.round(cy - gr * Math.cos(a) - GLYPH_H / 2)
+      // Black badge so the glyph stays legible over any route line or road
+      for (let gy = ly - pad; gy < ly + GLYPH_H + pad; gy++)
+        for (let gx = lx - pad; gx < lx + GLYPH_W + pad; gx++)
+          forcePixel(gx, gy, 0)
       drawGlyph(label, lx, ly, gc)
     }
   }
 
   // ── Position arrow — navigation chevron drawn last so it is always on top ────
   //
-  // 9 wide × 7 tall, centred on current position. Tip always points screen-up,
-  // which equals the heading direction on a heading-up map.
+  // 2× scaled (18 wide × 14 tall). Each logical pixel → 2×2 screen pixels.
+  // Logical centre (col 4, row 3) maps to (posX, posY).
+  // Tip always points screen-up = heading direction on a heading-up map.
   //
-  //   col: -4 -3 -2 -1  0 +1 +2 +3 +4
-  //         .  .  .  .  X  .  .  .  .   dy = -3  ← tip
-  //         .  .  .  X  X  X  .  .  .   dy = -2
-  //         .  .  X  X  X  X  X  .  .   dy = -1
-  //         .  X  X  X  X  X  X  X  .   dy =  0  ← centre / current position
-  //         X  X  X  X  X  X  X  X  X   dy = +1  ← widest (base)
-  //         X  X  .  .  .  .  .  X  X   dy = +2  ← concave wings
-  //         .  X  .  .  .  .  .  X  .   dy = +3  ← concave wings (flying-V notch)
+  //   col: -8..+9 screen pixels (logical cols 0-8, ×2 offset -8)
+  //         .  .  .  .  X  .  .  .  .   row 0  ← tip
+  //         .  .  .  X  X  X  .  .  .   row 1
+  //         .  .  X  X  X  X  X  .  .   row 2
+  //         .  X  X  X  X  X  X  X  .   row 3  ← centre (posX, posY)
+  //         X  X  X  X  X  X  X  X  X   row 4  ← widest
+  //         X  X  .  .  .  .  .  X  X   row 5  ← wings
+  //         .  X  .  .  .  .  .  X  .   row 6  ← flying-V notch
   //
   // Brightness = midpoint between current-step route (240) and background roads (40).
   {
     const [posX, posY] = toPixel(lat, lng)
     const PV = 140
     const shape = [
-      [0,0,0,0,1,0,0,0,0],  // dy=-3  tip
-      [0,0,0,1,1,1,0,0,0],  // dy=-2
-      [0,0,1,1,1,1,1,0,0],  // dy=-1
-      [0,1,1,1,1,1,1,1,0],  // dy= 0  centre
-      [1,1,1,1,1,1,1,1,1],  // dy=+1  widest
-      [1,1,0,0,0,0,0,1,1],  // dy=+2  wings
-      [0,1,0,0,0,0,0,1,0],  // dy=+3  wings (flying-V notch)
+      [0,0,0,0,1,0,0,0,0],  // row 0  tip
+      [0,0,0,1,1,1,0,0,0],  // row 1
+      [0,0,1,1,1,1,1,0,0],  // row 2
+      [0,1,1,1,1,1,1,1,0],  // row 3  centre
+      [1,1,1,1,1,1,1,1,1],  // row 4  widest
+      [1,1,0,0,0,0,0,1,1],  // row 5  wings
+      [0,1,0,0,0,0,0,1,0],  // row 6  notch
     ]
-    for (let dy = 0; dy < shape.length; dy++)
-      for (let dx = 0; dx < 9; dx++)
-        if (shape[dy][dx]) forcePixel(posX + dx - 4, posY + dy - 3, PV)
+    for (let row = 0; row < shape.length; row++)
+      for (let col = 0; col < 9; col++)
+        if (shape[row][col]) {
+          // Each logical pixel → 2×2 block; centre (col 4, row 3) → (posX, posY)
+          forcePixel(posX + col*2 - 8, posY + row*2 - 6, PV)
+          forcePixel(posX + col*2 - 7, posY + row*2 - 6, PV)
+          forcePixel(posX + col*2 - 8, posY + row*2 - 5, PV)
+          forcePixel(posX + col*2 - 7, posY + row*2 - 5, PV)
+        }
   }
 
   return pixels
