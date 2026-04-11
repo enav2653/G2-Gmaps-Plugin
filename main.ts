@@ -1105,11 +1105,6 @@ async function init() {
 
   await buildPage()
 
-  // Trigger compass calibration on first ever run (clears after figure-8 motion)
-  if (!localStorage.getItem('g2maps_compass_cal')) {
-    void startCalibration()
-  }
-
   // Start passive GPS immediately — probe the Android bridge first, fall back
   // to WebView geolocation.  startNavigation() calls stop* before taking over,
   // so this won't interfere with a later navigation session.
