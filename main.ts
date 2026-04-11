@@ -54,6 +54,7 @@ let buildPagePending = false  // a call arrived while buildingPage was true
 // Cached reference to whichever Android/bridge location method worked
 let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number; headingDeg?: number } | null>) | null = null
 let androidPollTimer: ReturnType<typeof setInterval> | null = null
+let bridgeScanned = false   // suppress repeated diagnostic logs during retry polls
 
 // Manual step preview (swipe) — null means track navigation step
 let previewStepIdx:   number | null = null
@@ -104,11 +105,14 @@ async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null>
   // If we already found a working provider, use it directly
   if (activeLocationProvider) return activeLocationProvider()
 
-  // Log visible bridge-related window properties for diagnostics
-  const bridgeKeys = Object.keys(window).filter(k =>
-    /android|bridge|even|flutter|native|webkit/i.test(k)
-  )
-  reportStatus(`window bridge keys: [${bridgeKeys.join(', ')}]`)
+  // Log visible bridge-related window properties — once only to avoid status spam
+  if (!bridgeScanned) {
+    bridgeScanned = true
+    const bridgeKeys = Object.keys(window).filter(k =>
+      /android|bridge|even|flutter|native|webkit/i.test(k)
+    )
+    reportStatus(`window bridge keys: [${bridgeKeys.join(', ')}]`)
+  }
 
   // --- 0. Local GPS bridge — Tasker HTTP server or companion app ----------
   //
@@ -228,7 +232,13 @@ function updatePollRate() {
 // ─── Android location polling ─────────────────────────────────────────────────
 
 async function pollLocation() {
-  if (!activeLocationProvider) return
+  if (!activeLocationProvider) {
+    // Silently retry until Tasker HTTP server comes online
+    await tryBridgeLocation()
+    if (!activeLocationProvider) return
+    // Provider just came online — switch to adaptive poll rate
+    updatePollRate()
+  }
   const loc = await activeLocationProvider()
   if (!loc) return
 
@@ -313,8 +323,9 @@ async function pollLocation() {
 
 function startAndroidPoll() {
   stopAndroidPoll()
-  if (!activeLocationProvider) return
-  const ms = pollIntervalMs()
+  // Always start the interval — pollLocation will retry finding Tasker each tick
+  // if activeLocationProvider is still null.
+  const ms = activeLocationProvider ? pollIntervalMs() : 2000
   reportStatus(`android poll: started (${ms} ms)`)
   androidPollTimer = setInterval(pollLocation, ms)
 }
@@ -990,17 +1001,14 @@ async function init() {
   // Start passive GPS immediately — probe the Android bridge first, fall back
   // to WebView geolocation.  startNavigation() calls stop* before taking over,
   // so this won't interfere with a later navigation session.
+  // Always start the poll loop; if Tasker isn't running yet, it retries every 2 s.
   tryBridgeLocation()
     .then(loc => {
-      if (loc) {
-        currentLat = loc.lat
-        currentLng = loc.lng
-        startAndroidPoll()
-      } else {
-        startGPS()
-      }
+      if (loc) { currentLat = loc.lat; currentLng = loc.lng }
+      startAndroidPoll()
+      if (!loc) startGPS()   // parallel fallback — harmless if Tasker picks up later
     })
-    .catch(() => startGPS())
+    .catch(() => { startAndroidPoll(); startGPS() })
 
   // Listen for phone-side events
   window.addEventListener('g2maps:navigate',  () => startNavigation())
