@@ -817,13 +817,32 @@ function quaternionToHeading(qx: number, qy: number, qz: number, qw: number): nu
 
 function startCompass() {
   const ALPHA = 0.15
+  let compassFired = false        // diagnostic: log first event
+  let lastRefreshHeading = -1     // for compass-driven minimap refresh
 
   function applyCompassReading(rawDeg: number) {
     const rad = rawDeg * Math.PI / 180
     deviceHeadingSin = ALPHA * Math.sin(rad) + (1 - ALPHA) * deviceHeadingSin
     deviceHeadingCos = ALPHA * Math.cos(rad) + (1 - ALPHA) * deviceHeadingCos
     deviceHeadingDeg = ((Math.atan2(deviceHeadingSin, deviceHeadingCos) * 180 / Math.PI) + 360) % 360
+
+    if (!compassFired) {
+      compassFired = true
+      reportStatus(`compass: first event alpha=${rawDeg.toFixed(1)}°`)
+    }
   }
+
+  // Compass-driven minimap refresh — update the map whenever heading changes ≥3°,
+  // independent of the GPS poll rate.  Capped at ~5 Hz by the 200 ms interval.
+  setInterval(() => {
+    if (deviceHeadingDeg === null || speedMph >= 5) return  // GPS heading drives at speed
+    let diff = Math.abs(deviceHeadingDeg - lastRefreshHeading)
+    if (diff > 180) diff = 360 - diff
+    if (diff >= 3) {
+      lastRefreshHeading = deviceHeadingDeg
+      refreshMinimap().catch(() => {})
+    }
+  }, 200)
 
   function startDeviceOrientationFallback() {
     const onOrientation = (e: DeviceOrientationEvent) => {
