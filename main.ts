@@ -109,11 +109,8 @@ function parseLocation(r: any): { lat: number; lng: number; speedMs?: number; he
     try { r = JSON.parse(r) } catch { return null }
   }
   const speedMs = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
-  // Accept heading/bearing/course; Tasker %LOCBEAR returns -1 when unavailable
-  const rawHdg = r.heading ?? r.bearing ?? r.course
-  const headingDeg = rawHdg != null && !isNaN(+rawHdg) && +rawHdg >= 0 ? +rawHdg : undefined
-  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs, headingDeg }
-  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs, headingDeg }
+  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs }
+  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs }
   return null
 }
 
@@ -286,8 +283,6 @@ async function pollLocation() {
   } else if (loc.speedMs != null) {
     speedMph = loc.speedMs * 2.23694
   }
-  // Tasker %LOCBEAR — GPS hardware heading, accurate at all speeds
-  if (loc.headingDeg != null) gpsHeadingDeg = loc.headingDeg
   // Calibrate compass from GPS heading + decay confidence (~1 hr half-life at 2 s poll rate)
   compassBiasCnf *= 0.9996
   calibrateCompassFromGPS()
