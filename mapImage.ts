@@ -329,3 +329,86 @@ export function renderMinimapBmpTiles(
   return tiles
 }
 
+// ─── Compass calibration screen ───────────────────────────────────────────────
+//
+// Replaces the minimap during the initial figure-8 calibration routine.
+// Draws three vertical progress bars: rotation (α), tilt (β), roll (γ).
+// Each bar fills bottom-up; a checkmark appears below when that axis is done.
+
+/** Renders a compass calibration progress graphic into the minimap tiles.
+ *  rotPct / tiltPct / rollPct are each 0–1. */
+export function renderCalibrationBmpTiles(
+  rotPct: number, tiltPct: number, rollPct: number,
+  totalW: number, totalH: number, tileW: number, tileH: number,
+): number[][] {
+  const pixels = new Uint8Array(totalW * totalH).fill(3)  // dark background
+
+  function px(x: number, y: number, v: number) {
+    if (x >= 0 && x < totalW && y >= 0 && y < totalH) pixels[y * totalW + x] = v
+  }
+  function rect(x0: number, y0: number, x1: number, y1: number, v: number) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) px(x, y, v)
+  }
+  function icon(m: number[][], ox: number, oy: number, v: number) {
+    for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) if (m[r][c]) px(ox+c, oy+r, v)
+  }
+
+  // 9×8 pixel icons for the three axes
+  const ICO_ROT: number[][] = [          // circular arrow (clockwise)
+    [0,0,1,1,1,0,0,0,0], [0,1,0,0,0,1,0,0,0], [0,0,0,0,0,1,0,0,0],
+    [0,0,0,0,1,1,1,0,0], [0,1,0,0,0,0,0,0,0], [0,0,1,1,1,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
+  const ICO_TILT: number[][] = [         // up / down arrows
+    [0,0,0,1,0,0,0,0,0], [0,0,1,1,1,0,0,0,0], [0,0,0,1,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,1,0,0,0,0,0], [0,0,1,1,1,0,0,0,0],
+    [0,0,0,1,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
+  const ICO_ROLL: number[][] = [         // left / right arrows
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0], [0,1,0,0,0,0,0,1,0],
+    [1,1,1,0,0,0,1,1,1], [0,1,0,0,0,0,0,1,0], [0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
+  const ICO_CHECK: number[][] = [        // checkmark
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,1,0,0,0], [0,0,0,0,1,0,0,0,0],
+    [1,0,0,1,0,0,0,0,0], [0,1,1,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
+
+  const BAR_W  = 14, BAR_H = 76, BAR_Y = 32
+  const BAR_XS = [22, 55, 88]
+  const PCTS   = [rotPct, tiltPct, rollPct]
+  const ICONS  = [ICO_ROT, ICO_TILT, ICO_ROLL]
+
+  for (let i = 0; i < 3; i++) {
+    const bx = BAR_XS[i]
+    const p  = Math.min(1, Math.max(0, PCTS[i]))
+
+    icon(ICONS[i], bx + 2, 8, 11)                                    // axis icon
+
+    rect(bx, BAR_Y, bx + BAR_W, BAR_Y + BAR_H, 6)                   // bar border
+    rect(bx + 1, BAR_Y + 1, bx + BAR_W - 1, BAR_Y + BAR_H - 1, 2)  // bar background
+
+    const fillH = Math.round(BAR_H * p)                               // bar fill
+    if (fillH > 0)
+      rect(bx + 1, BAR_Y + BAR_H - fillH, bx + BAR_W - 1, BAR_Y + BAR_H - 1,
+           p >= 1 ? 15 : 11)
+
+    if (p >= 1) icon(ICO_CHECK, bx + 2, BAR_Y + BAR_H + 4, 15)      // done: ✓
+    else         rect(bx + 5, BAR_Y + BAR_H + 5, bx + 9, BAR_Y + BAR_H + 8, 5) // pending dot
+  }
+
+  // Slice into tiles
+  const cols = totalW / tileW, rows = totalH / tileH
+  const tiles: number[][] = []
+  for (let row = 0; row < rows; row++)
+    for (let col = 0; col < cols; col++) {
+      const sub = new Uint8Array(tileW * tileH)
+      for (let y = 0; y < tileH; y++)
+        for (let x = 0; x < tileW; x++)
+          sub[y * tileW + x] = pixels[(row * tileH + y) * totalW + (col * tileW + x)]
+      tiles.push(Array.from(encodeGreyscale4BitBmp(tileW, tileH, sub)))
+    }
+  return tiles
+}
+

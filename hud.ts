@@ -76,7 +76,7 @@ export function bannerModeLabel(m: BannerMode): string {
 
 // ─── Nav states ──────────────────────────────────────────────────────────────
 
-export type NavState = 'navigating' | 'paused' | 'passive' | 'idle'
+export type NavState = 'navigating' | 'paused' | 'passive' | 'idle' | 'calibrating'
 
 // ─── Banner content ───────────────────────────────────────────────────────────
 
@@ -87,9 +87,10 @@ export function buildBannerText(
   bannerMode: BannerMode,
   liveDistM?: number,
 ): string {
-  if (state === 'idle')    return 'G2 Maps  •  Set a destination'
-  if (state === 'passive') return 'Passive map  •  No active route'
-  if (state === 'paused')  return 'Navigation paused  •  Tap to resume'
+  if (state === 'idle')        return 'G2 Maps  •  Set a destination'
+  if (state === 'passive')     return 'Passive map  •  No active route'
+  if (state === 'paused')      return 'Navigation paused  •  Tap to resume'
+  if (state === 'calibrating') return 'Compass Calibration\nWave phone in figure-8 pattern'
 
   const step = steps[stepIdx]
   if (!step) return 'Finding location…'

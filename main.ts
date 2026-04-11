@@ -12,7 +12,7 @@ import {
 import { getRoute, RouteStep } from './maps'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
-import { renderMinimapBmpTiles } from './mapImage'
+import { renderMinimapBmpTiles, renderCalibrationBmpTiles } from './mapImage'
 import { getCachedRoads, refreshRoads } from './roadData'
 import {
   buildEventContainer,
@@ -76,6 +76,22 @@ let deviceHeadingCos = 1
 // compassBiasCnf grows toward 1 as GPS calibrates; decays ~1 hr half-life without updates.
 let compassBias    = 0
 let compassBiasCnf = 0
+
+// ─── Initial compass calibration (figure-8 motion) ───────────────────────────
+// On first run, the user is guided through a figure-8 motion to seed the
+// magnetometer and establish good compass accuracy before GPS takes over.
+// Coverage is tracked as accumulated absolute change in each sensor axis.
+let calActive     = false
+let calRot        = 0    // accumulated |Δalpha| — rotation about vertical
+let calTilt       = 0    // accumulated |Δbeta|  — forward/back tilt
+let calRoll       = 0    // accumulated |Δgamma| — left/right roll
+let calLastAlpha  = -1   // -1 = uninitialised
+let calLastBeta   = 0
+let calLastGamma  = 0
+let calDispTimer  = 0    // last display refresh (ms), throttled to 2 Hz
+const CAL_ROT_DEG  = 360 // total rotation needed
+const CAL_TILT_DEG = 90  // total tilt travel needed
+const CAL_ROLL_DEG = 90  // total roll travel needed
 
 // Reroute guard
 let rerouteInProgress = false
@@ -413,6 +429,79 @@ function calibrateCompassFromGPS() {
   compassBiasCnf = Math.min(1, compassBiasCnf + 0.1)
 }
 
+// ─── Figure-8 calibration ─────────────────────────────────────────────────────
+
+/** Feed one orientation sample into the calibration tracker.
+ *  Called from startCompass() for every sensor event while calActive=true. */
+function updateCalibration(alpha: number, beta: number, gamma: number) {
+  if (!calActive) return
+
+  if (calLastAlpha >= 0) {
+    let da = Math.abs(alpha - calLastAlpha)
+    if (da > 180) da = 360 - da          // handle 0°/360° wrap
+    calRot  += da
+    calTilt += Math.abs(beta  - calLastBeta)
+    calRoll += Math.abs(gamma - calLastGamma)
+  }
+  calLastAlpha = alpha; calLastBeta = beta; calLastGamma = gamma
+
+  const rotPct  = Math.min(1, calRot  / CAL_ROT_DEG)
+  const tiltPct = Math.min(1, calTilt / CAL_TILT_DEG)
+  const rollPct = Math.min(1, calRoll / CAL_ROLL_DEG)
+
+  // Throttle display to 2 Hz — bridge can't keep up with sensor rate
+  const now = Date.now()
+  if (now - calDispTimer > 500) {
+    calDispTimer = now
+    void refreshCalibrationDisplay(rotPct, tiltPct, rollPct)
+  }
+
+  if (rotPct >= 1 && tiltPct >= 1 && rollPct >= 1) finishCalibration()
+}
+
+async function refreshCalibrationDisplay(rotPct: number, tiltPct: number, rollPct: number) {
+  if (!pageCreated) return
+  try {
+    const pct = Math.round((rotPct + tiltPct + rollPct) / 3 * 100)
+    const bannerText = pct >= 100
+      ? 'Compass Calibrated  ✓  Accuracy improves as you drive'
+      : `Compass Cal  ${pct}%  –  Wave phone in figure-8 pattern`
+    await bridge.textContainerUpgrade(new TextContainerUpgrade({
+      containerID: CID.BANNER, containerName: 'banner', content: bannerText,
+    }))
+
+    const tiles = renderCalibrationBmpTiles(
+      rotPct, tiltPct, rollPct,
+      MINIMAP_IMG_W, MINIMAP_IMG_H, MINIMAP_TILE_W, MINIMAP_TILE_H,
+    )
+    await Promise.all(tiles.map((tileData, i) =>
+      bridge.updateImageRawData(new ImageRawDataUpdate({
+        containerID:   MAP_TILE_CIDS[i],
+        containerName: `minimap_${i % 2}_${Math.floor(i / 2)}`,
+        imageData:     tileData,
+      }))
+    ))
+  } catch { /* bridge not ready yet */ }
+}
+
+async function startCalibration() {
+  calActive = true; calRot = calTilt = calRoll = 0; calLastAlpha = -1
+  navState = 'calibrating'
+  await buildPage()
+  await refreshCalibrationDisplay(0, 0, 0)
+}
+
+async function finishCalibration() {
+  if (!calActive) return
+  calActive = false
+  localStorage.setItem('g2maps_compass_cal', '1')
+  await refreshCalibrationDisplay(1, 1, 1)
+  await new Promise(r => setTimeout(r, 2000))  // show "Done" briefly
+  navState = 'passive'
+  await buildPage()
+  await refreshMinimap()
+}
+
 /**
  * Active map heading: GPS bearing when speed ≥ 5 mph, GPS-calibrated compass otherwise.
  * When moving, the observed GPS−compass offset is stored as a bias. At lower speeds the
@@ -603,6 +692,7 @@ async function refreshSpeed() {
 }
 
 async function refreshMinimap() {
+  if (navState === 'calibrating') return
   if (!settings.minimap.visible || !pageCreated) return
   if (!currentLat && !currentLng) return
   if (minimapRefreshing) return
@@ -744,6 +834,8 @@ function startCompass() {
     const onOrientation = (e: DeviceOrientationEvent) => {
       if (e.alpha === null) return
       applyCompassReading(e.alpha)
+      if (calActive && e.beta !== null && e.gamma !== null)
+        updateCalibration(e.alpha, e.beta, e.gamma)
     }
     // deviceorientationabsolute is always compass-referenced on Android
     window.addEventListener('deviceorientationabsolute', onOrientation as EventListener, true)
@@ -767,6 +859,13 @@ function startCompass() {
         sensor.addEventListener('reading', () => {
           const [qx, qy, qz, qw] = sensor.quaternion as [number, number, number, number]
           applyCompassReading(quaternionToHeading(qx, qy, qz, qw))
+          if (calActive) {
+            // Extract Euler-like angles from quaternion for calibration coverage tracking
+            const alpha = quaternionToHeading(qx, qy, qz, qw)
+            const beta  = Math.asin(Math.max(-1, Math.min(1, 2*(qw*qx - qy*qz)))) * 180/Math.PI
+            const gamma = Math.atan2(2*(qw*qy + qx*qz), 1-2*(qy*qy+qz*qz)) * 180/Math.PI
+            updateCalibration(alpha, beta, gamma)
+          }
         })
         sensor.addEventListener('error', () => startDeviceOrientationFallback())
         sensor.start()
@@ -1005,6 +1104,11 @@ async function init() {
   })
 
   await buildPage()
+
+  // Trigger compass calibration on first ever run (clears after figure-8 motion)
+  if (!localStorage.getItem('g2maps_compass_cal')) {
+    void startCalibration()
+  }
 
   // Start passive GPS immediately — probe the Android bridge first, fall back
   // to WebView geolocation.  startNavigation() calls stop* before taking over,
