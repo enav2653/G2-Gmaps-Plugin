@@ -101,6 +101,14 @@ function parseLocation(r: any): { lat: number; lng: number; speedMs?: number; he
   return null
 }
 
+/** Parse a Response body tolerantly: tries JSON, then strips unsubstituted
+ *  Tasker variables (e.g. %LOCSPEED, %LOCBEAR) and retries. */
+async function fetchJsonTolerant(res: Response): Promise<any> {
+  const text = await res.text()
+  try { return JSON.parse(text) } catch { /* fall through */ }
+  try { return JSON.parse(text.replace(/%[A-Z0-9_]+/g, 'null')) } catch { return null }
+}
+
 async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null> {
   // If we already found a working provider, use it directly
   if (activeLocationProvider) return activeLocationProvider()
@@ -134,7 +142,7 @@ async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null>
     const res   = await fetch(GPS_BRIDGE_URL, { signal: ctrl.signal })
     clearTimeout(timer)
     if (res.ok) {
-      const loc = parseLocation(await res.json())
+      const loc = parseLocation(await fetchJsonTolerant(res))
       if (loc) {
         reportStatus(`local GPS bridge: OK (${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)})`)
         activeLocationProvider = async () => {
@@ -143,7 +151,7 @@ async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null>
             const t = setTimeout(() => c.abort(), 800)
             const r = await fetch(GPS_BRIDGE_URL, { signal: c.signal })
             clearTimeout(t)
-            return r.ok ? parseLocation(await r.json()) : null
+            return r.ok ? parseLocation(await fetchJsonTolerant(r)) : null
           } catch { return null }
         }
         return loc
