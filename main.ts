@@ -808,17 +808,18 @@ function startCompass() {
   // deviceorientation as fallback (may be relative on some browsers)
   window.addEventListener('deviceorientation',         onOrientation as EventListener, true)
 
-  // Compass-driven minimap refresh — update the map whenever heading changes ≥ 3°,
-  // independently of the GPS poll rate. Capped at ~5 Hz by the 200 ms interval.
+  // Compass-driven minimap refresh — update the map whenever heading changes ≥ 1°,
+  // independently of the GPS poll rate. Capped at ~10 Hz by the 100 ms interval.
+  // minimapRefreshing guard prevents concurrent renders from queuing up.
   setInterval(() => {
     if (deviceHeadingDeg === null || speedMph >= 5) return
     let diff = Math.abs(deviceHeadingDeg - lastRefreshHeading)
     if (diff > 180) diff = 360 - diff
-    if (diff >= 3) {
+    if (diff >= 1) {
       lastRefreshHeading = deviceHeadingDeg
       refreshMinimap().catch(() => {})
     }
-  }, 200)
+  }, 100)
 
   // iOS 13+ requires explicit permission
   const DOE = DeviceOrientationEvent as any
