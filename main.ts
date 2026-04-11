@@ -70,6 +70,11 @@ let deviceHeadingDeg: number | null = null
 // Circular EMA state for compass smoothing (sin/cos components, initialised north)
 let deviceHeadingSin = 0
 let deviceHeadingCos = 1
+// Compass bias calibration: GPS-learned offset corrects the magnetometer when stationary.
+// compassBias  = EMA of (gpsHeading − deviceHeading) while speed ≥ 5 mph
+// compassBiasCnf grows toward 1 as GPS calibrates; decays ~1 hr half-life without updates.
+let compassBias    = 0
+let compassBiasCnf = 0
 
 // Reroute guard
 let rerouteInProgress = false
@@ -249,6 +254,9 @@ async function pollLocation() {
   }
   // Tasker %LOCBEAR — GPS hardware heading, accurate at all speeds
   if (loc.headingDeg != null) gpsHeadingDeg = loc.headingDeg
+  // Calibrate compass from GPS heading + decay confidence (~1 hr half-life at 2 s poll rate)
+  compassBiasCnf *= 0.9996
+  calibrateCompassFromGPS()
   prevPollLat = loc.lat; prevPollLng = loc.lng; prevPollTime = now
 
   currentLat = loc.lat
@@ -373,12 +381,39 @@ function bearing(lat1: number, lng1: number, lat2: number, lng2: number): number
 }
 
 /**
- * Active map heading: GPS bearing when speed ≥ 5 mph, device compass otherwise.
+ * When GPS heading is reliable (speed ≥ 5 mph), learn the offset between GPS and
+ * the device compass so we can correct the compass at lower speeds / when stationary.
+ * Uses circular EMA so 0°/360° boundaries don't create jumps.
+ */
+function calibrateCompassFromGPS() {
+  if (gpsHeadingDeg === null || deviceHeadingDeg === null || speedMph < 5) return
+  let diff = gpsHeadingDeg - deviceHeadingDeg
+  if (diff >  180) diff -= 360
+  if (diff < -180) diff += 360
+  compassBias    = 0.15 * diff + 0.85 * compassBias
+  compassBiasCnf = Math.min(1, compassBiasCnf + 0.1)
+}
+
+/**
+ * Active map heading: GPS bearing when speed ≥ 5 mph, GPS-calibrated compass otherwise.
+ * When moving, the observed GPS−compass offset is stored as a bias. At lower speeds the
+ * bias is applied to the compass reading (dead-reckoning from last known good heading).
+ * Confidence [0,1] blends raw→corrected so the correction fades if GPS was long ago.
  * Returns 0 (north-up) when neither source is available.
  */
 function activeHeadingDeg(): number {
   if (speedMph >= 5 && gpsHeadingDeg !== null) return gpsHeadingDeg
-  if (deviceHeadingDeg !== null) return deviceHeadingDeg
+  if (deviceHeadingDeg !== null) {
+    if (compassBiasCnf <= 0) return deviceHeadingDeg
+    // Corrected heading = deviceHeading + bias; blend toward raw at low confidence
+    const corrected = ((deviceHeadingDeg + compassBias) % 360 + 360) % 360
+    const c   = compassBiasCnf
+    const cR  = corrected * Math.PI / 180
+    const rR  = deviceHeadingDeg * Math.PI / 180
+    const sinH = c * Math.sin(cR) + (1 - c) * Math.sin(rR)
+    const cosH = c * Math.cos(cR) + (1 - c) * Math.cos(rR)
+    return ((Math.atan2(sinH, cosH) * 180 / Math.PI) + 360) % 360
+  }
   return 0
 }
 
@@ -591,6 +626,8 @@ function startGPS() {
       speedMph   = speed != null ? speed * 2.23694 : speedMph
       if (heading != null && !isNaN(heading) && speed != null && speed > 2)
         gpsHeadingDeg = heading
+      compassBiasCnf *= 0.9996
+      calibrateCompassFromGPS()
 
       // Fetch speed limit in parallel — cached by place ID so usually instant
       const newLimit   = await getSpeedLimitMph(lat, lng)
