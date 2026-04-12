@@ -24,6 +24,8 @@ import {
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
+  buildMediaText,
+  buildMediaContainer,
   BANNER_MODES, BannerMode,
   NavState,
   CID,
@@ -51,12 +53,25 @@ let pageCreated  = false
 let buildingPage = false  // serialises concurrent buildPage calls
 
 // Cached reference to whichever Android/bridge location method worked
-let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number } | null>) | null = null
+type LocationFix = {
+  lat: number
+  lng: number
+  speedMs?: number
+  mediaTitle?: string
+  mediaArtist?: string
+  mediaPlaying?: boolean
+}
+let activeLocationProvider: (() => Promise<LocationFix | null>) | null = null
 let androidPollTimer: ReturnType<typeof setInterval> | null = null
 
 // Manual step preview (swipe) — null means track navigation step
 let previewStepIdx:   number | null = null
 let previewResetTimer: ReturnType<typeof setTimeout> | null = null
+
+// Media state — populated from Tasker GPS bridge response
+let mediaTitle   = ''
+let mediaArtist  = ''
+let mediaPlaying = false
 
 // Speed calculation from consecutive position fixes
 let prevPollLat  = 0
@@ -73,14 +88,21 @@ let rerouteInProgress = false
 // Once a working provider is found it is cached in activeLocationProvider
 // so subsequent polls don't re-scan.
 
-function parseLocation(r: any): { lat: number; lng: number; speedMs?: number } | null {
+function parseLocation(r: any): LocationFix | null {
   if (r == null) return null
   if (typeof r === 'string') {
     try { r = JSON.parse(r) } catch { return null }
   }
-  const speedMs = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
-  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs }
-  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs }
+  const speedMs     = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
+  const mediaTitle  = typeof r.media_title  === 'string' ? r.media_title  : undefined
+  const mediaArtist = typeof r.media_artist === 'string' ? r.media_artist : undefined
+  const mediaPlaying = r.media_playing === true || r.media_playing === 'true' ? true
+    : r.media_playing === false || r.media_playing === 'false' ? false
+    : undefined
+  if (r.lat != null && r.lng != null)
+    return { lat: +r.lat, lng: +r.lng, speedMs, mediaTitle, mediaArtist, mediaPlaying }
+  if (r.latitude != null && r.longitude != null)
+    return { lat: +r.latitude, lng: +r.longitude, speedMs, mediaTitle, mediaArtist, mediaPlaying }
   return null
 }
 
@@ -234,9 +256,21 @@ async function pollLocation() {
   currentLat = loc.lat
   currentLng = loc.lng
 
+  // ─── Media state ──────────────────────────────────────────────────────────
+  const prevMediaPlaying = mediaPlaying
+  if (loc.mediaTitle   !== undefined) mediaTitle   = loc.mediaTitle
+  if (loc.mediaArtist  !== undefined) mediaArtist  = loc.mediaArtist
+  if (loc.mediaPlaying !== undefined) mediaPlaying = loc.mediaPlaying
+  const mediaStateChanged = prevMediaPlaying !== mediaPlaying
+
   if (navState !== 'navigating') {
-    await refreshSpeed()
-    await refreshMinimap()
+    if (mediaStateChanged) {
+      await buildPage()
+    } else {
+      await refreshSpeed()
+      await refreshMinimap()
+      if (mediaPlaying) await refreshMedia()
+    }
     updatePollRate()
     return
   }
@@ -270,10 +304,15 @@ async function pollLocation() {
   updatePollRate()
 
   if (!stepped) {
-    // In-place text update only — live updates without full rebuild
-    await refreshBanner()
-    await refreshSpeed()
-    await refreshMinimap()
+    if (mediaStateChanged) {
+      await buildPage()
+    } else {
+      // In-place text update only — live updates without full rebuild
+      await refreshBanner()
+      await refreshSpeed()
+      await refreshMinimap()
+      if (mediaPlaying) await refreshMedia()
+    }
     return
   }
 
@@ -436,6 +475,10 @@ async function buildPage() {
     if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent))
     const speedContainer = buildSpeedContainer(speedContent, settings)
     if (speedContainer) textContainers.push(speedContainer)
+    if (mediaPlaying) {
+      const mediaContainer = buildMediaContainer(buildMediaText(mediaTitle, mediaArtist))
+      if (mediaContainer) textContainers.push(mediaContainer)
+    }
 
     const imageContainers: ImageContainerProperty[] = [
       ...buildMinimapImageContainers(settings),
@@ -491,6 +534,18 @@ async function refreshSpeed() {
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.SPEED,
     containerName: 'speed',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
+}
+
+async function refreshMedia() {
+  if (!mediaPlaying) return
+  const content = buildMediaText(mediaTitle, mediaArtist)
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.MEDIA,
+    containerName: 'media',
     content,
     contentOffset: 0,
     contentLength: content.length,
@@ -800,6 +855,7 @@ async function init() {
       refreshBanner()
       refreshSpeed()
       refreshMinimap()
+      if (mediaPlaying) refreshMedia()
     }
   })
 

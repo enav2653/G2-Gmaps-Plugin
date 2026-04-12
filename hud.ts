@@ -52,12 +52,18 @@ const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
 
+// Media container — bottom strip between minimap and speed
+const MEDIA_PAD = 6
+const MEDIA_X   = MAP_PAD_L + MINIMAP_IMG_W + MEDIA_PAD          // 130
+const MEDIA_W   = CANVAS_W - MEDIA_X - (56 + SPD_RIGHT_MARGIN + MEDIA_PAD)  // 376
+
 // ─── Container IDs ───────────────────────────────────────────────────────────
 
 export const CID = {
   EVENT:  1,
   BANNER: 2,
   SPEED:  4,
+  MEDIA:  8,
 } as const
 
 // 4 tile IDs for the 2×2 minimap grid (row-major, left-to-right top-to-bottom)
@@ -200,6 +206,29 @@ export function buildMinimapImageContainers(
       width:         MINIMAP_TILE_W,
       height:        MINIMAP_TILE_H,
     })
+  })
+}
+
+/** Now-playing text container — bottom strip, between minimap and speed. */
+export function buildMediaText(title: string, artist: string): string {
+  const cap = (s: string) => s.length > 38 ? s.slice(0, 37) + '…' : s
+  return `${cap(title)}\n${cap(artist)}`
+}
+
+export function buildMediaContainer(content: string): TextContainerProperty | null {
+  if (!content.trim()) return null
+  return new TextContainerProperty({
+    containerID:   CID.MEDIA,
+    containerName: 'media',
+    xPosition:     MEDIA_X,
+    yPosition:     BOTTOM_Y,
+    width:         MEDIA_W,
+    height:        BOTTOM_H,
+    borderWidth:   0,
+    borderColor:   0,
+    paddingLength: 4,
+    content,
+    isEventCapture: 0,
   })
 }
 
