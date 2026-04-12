@@ -784,7 +784,8 @@ function startCompass() {
 
   const onOrientation = (e: DeviceOrientationEvent) => {
     if (e.alpha === null) return
-    const rad = e.alpha * Math.PI / 180
+    // alpha follows W3C convention: positive = CCW. Convert to CW compass bearing.
+    const rad = (360 - e.alpha) * Math.PI / 180
     deviceHeadingSin = ALPHA * Math.sin(rad) + (1 - ALPHA) * deviceHeadingSin
     deviceHeadingCos = ALPHA * Math.cos(rad) + (1 - ALPHA) * deviceHeadingCos
     deviceHeadingDeg = ((Math.atan2(deviceHeadingSin, deviceHeadingCos) * 180 / Math.PI) + 360) % 360
