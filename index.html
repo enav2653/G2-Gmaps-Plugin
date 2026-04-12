@@ -35,9 +35,7 @@
     .panel.active { display: flex; }
 
     /* ── Nav panel ── */
-    .nav-search { padding: 16px; }
-    .search-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
-                    color: var(--muted); margin-bottom: 6px; }
+    .nav-search { padding: 16px 16px 0; }
     .search-input { width: 100%; background: var(--surface); border: 0.5px solid var(--border);
                     border-radius: 10px; color: var(--text); font-size: 15px;
                     padding: 11px 14px; outline: none; transition: border-color 0.15s; }
@@ -48,22 +46,51 @@
                    border: 0.5px solid var(--border); border-radius: 10px;
                    overflow: hidden; display: none; }
     .suggestions.open { display: block; }
-    .suggestion { padding: 11px 14px; cursor: pointer; border-bottom: 0.5px solid var(--border); }
+    .suggestion { display: flex; align-items: center; gap: 10px;
+                  padding: 11px 14px; cursor: pointer; border-bottom: 0.5px solid var(--border); }
     .suggestion:last-child { border-bottom: none; }
     .suggestion:active { background: rgba(255,255,255,0.04); }
-    .sug-name { font-size: 14px; }
-    .sug-addr { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .sug-icon { font-size: 14px; color: var(--muted); flex-shrink: 0; width: 18px;
+                text-align: center; }
+    .sug-body { flex: 1; min-width: 0; }
+    .sug-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sug-addr { font-size: 12px; color: var(--muted); margin-top: 2px;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .selected-dest { margin: 10px 16px 0; padding: 10px 14px; background: rgba(55,138,221,0.08);
                      border: 0.5px solid rgba(55,138,221,0.2); border-radius: 10px;
                      font-size: 13px; color: var(--accent); display: none; }
     .selected-dest.open { display: block; }
 
-    .go-btn { margin: 14px 16px 0; padding: 14px; background: var(--accent); border: none;
+    .save-fav-row { padding: 8px 16px 0; display: none; }
+    .save-fav-btn { width: 100%; padding: 10px; background: transparent;
+                    border: 0.5px solid var(--amber); border-radius: 10px;
+                    color: var(--amber); font-size: 13px; cursor: pointer;
+                    transition: background 0.1s; }
+    .save-fav-btn:active { background: rgba(200,144,80,0.1); }
+
+    .go-btn { margin: 10px 16px 0; padding: 14px; background: var(--accent); border: none;
               border-radius: 12px; color: #fff; font-size: 15px; font-weight: 600;
               cursor: pointer; transition: opacity 0.15s; }
     .go-btn:disabled { opacity: 0.3; cursor: not-allowed; }
     .go-btn:active:not(:disabled) { opacity: 0.85; }
+
+    /* ── Favorites ── */
+    .fav-section { margin-top: 16px; border-top: 0.5px solid var(--border); }
+    .fav-header { padding: 12px 16px 4px; font-size: 10px; text-transform: uppercase;
+                  letter-spacing: 0.08em; color: var(--muted); }
+    .fav-item { display: flex; align-items: center; gap: 12px; padding: 11px 16px;
+                border-bottom: 0.5px solid var(--border); cursor: pointer;
+                transition: background 0.1s; }
+    .fav-item:last-child { border-bottom: none; }
+    .fav-item:active { background: rgba(255,255,255,0.04); }
+    .fav-icon { color: var(--amber); font-size: 15px; flex-shrink: 0; }
+    .fav-text { flex: 1; min-width: 0; }
+    .fav-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fav-addr { font-size: 11px; color: var(--muted); margin-top: 2px;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fav-remove { background: none; border: none; color: var(--muted); font-size: 20px;
+                  line-height: 1; padding: 4px 2px; cursor: pointer; flex-shrink: 0; }
 
     /* ── Status bar ── */
     .status { padding: 12px 16px; font-size: 12px; color: var(--muted);
@@ -164,22 +191,20 @@
      ══════════════════════════════════════════ -->
 <div class="panel active" id="panel-nav">
   <div class="nav-search">
-    <div class="search-label">Starting from</div>
-    <input class="search-input" id="origin-input" type="text"
-           placeholder="Current location (or type an address)"
-           autocomplete="off" autocorrect="off" spellcheck="false"/>
-  </div>
-  <div class="suggestions" id="origin-suggestions"></div>
-  <div class="selected-dest" id="selected-origin" style="display:none"></div>
-  <div class="nav-search" style="margin-top:8px">
-    <div class="search-label">Destination</div>
     <input class="search-input" id="dest-input" type="text"
-           placeholder="Search address or place…"
+           placeholder="Search destination or lat, lng…"
            autocomplete="off" autocorrect="off" spellcheck="false"/>
   </div>
   <div class="suggestions" id="suggestions"></div>
   <div class="selected-dest" id="selected-dest"></div>
+  <div class="save-fav-row" id="save-fav-row">
+    <button class="save-fav-btn" id="save-fav-btn">★ Save as favorite</button>
+  </div>
   <button class="go-btn" id="go-btn" disabled>Navigate on G2</button>
+  <div class="fav-section" id="fav-section" style="display:none">
+    <div class="fav-header">Favorites</div>
+    <div id="fav-list"></div>
+  </div>
   <div class="status" id="status">Enter a destination to begin</div>
 </div>
 
@@ -373,37 +398,158 @@
   })
 
   // ── Nav tab ────────────────────────────────────────────────────────────────
-  const originInput    = document.getElementById('origin-input')
-  const originSuggEl  = document.getElementById('origin-suggestions')
-  const selectedOriEl  = document.getElementById('selected-origin')
-  const destInput      = document.getElementById('dest-input')
-  const suggestions    = document.getElementById('suggestions')
-  const selectedEl     = document.getElementById('selected-dest')
-  const goBtn          = document.getElementById('go-btn')
-  const statusEl       = document.getElementById('status')
+  const destInput  = document.getElementById('dest-input')
+  const suggestions = document.getElementById('suggestions')
+  const selectedEl  = document.getElementById('selected-dest')
+  const goBtn       = document.getElementById('go-btn')
+  const statusEl    = document.getElementById('status')
+  const saveFavRow  = document.getElementById('save-fav-row')
+  const saveFavBtn  = document.getElementById('save-fav-btn')
 
   let selectedLocation = null
-  let selectedOrigin   = null
   let debounce = null
-  let originDebounce = null
 
   const script = document.createElement('script')
   script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&loading=async&v=weekly`
   script.async = true
   document.head.appendChild(script)
 
-  originInput.addEventListener('input', () => {
-    clearTimeout(originDebounce)
-    selectedOrigin = null
-    sessionStorage.removeItem('g2maps_origin')
-    const q = originInput.value.trim()
-    if (q.length < 3) { originSuggEl.innerHTML = ''; originSuggEl.classList.remove('open'); return }
-    originDebounce = setTimeout(() => fetchSuggestions(q, originSuggEl, (placeId, name) =>
-      selectPlace(placeId, name, originInput, originSuggEl, selectedOriEl, loc => {
-        selectedOrigin = loc
-        sessionStorage.setItem('g2maps_origin', JSON.stringify(loc))
+  // ── Persistence helpers ────────────────────────────────────────────────────
+  function loadFavorites() {
+    try { return JSON.parse(localStorage.getItem('g2maps_favorites') || '[]') } catch { return [] }
+  }
+  function storeFavorites(favs) {
+    localStorage.setItem('g2maps_favorites', JSON.stringify(favs))
+  }
+  function loadRecents() {
+    try { return JSON.parse(localStorage.getItem('g2maps_recents') || '[]') } catch { return [] }
+  }
+  function addRecent(loc) {
+    let recents = loadRecents().filter(r => r.label !== loc.label)
+    recents.unshift({ name: loc.name || loc.label, label: loc.label, lat: loc.lat, lng: loc.lng })
+    localStorage.setItem('g2maps_recents', JSON.stringify(recents.slice(0, 5)))
+  }
+
+  // ── Lat/lng detection ──────────────────────────────────────────────────────
+  function parseLatLng(q) {
+    const m = q.trim().match(/^(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)$/)
+    if (!m) return null
+    const lat = parseFloat(m[1]), lng = parseFloat(m[2])
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
+    const label = `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+    return { lat, lng, name: label, label }
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+
+  // ── Favorites rendering ────────────────────────────────────────────────────
+  function renderFavorites() {
+    const favs = loadFavorites()
+    const section = document.getElementById('fav-section')
+    const list    = document.getElementById('fav-list')
+    if (!favs.length) { section.style.display = 'none'; return }
+    section.style.display = ''
+    list.innerHTML = favs.map((f, i) => `
+      <div class="fav-item" data-idx="${i}">
+        <div class="fav-icon">★</div>
+        <div class="fav-text">
+          <div class="fav-name">${esc(f.name || f.label)}</div>
+          ${f.label !== (f.name || '') ? `<div class="fav-addr">${esc(f.label)}</div>` : ''}
+        </div>
+        <button class="fav-remove" data-idx="${i}" title="Remove">×</button>
+      </div>`).join('')
+    list.querySelectorAll('.fav-item').forEach(el => {
+      el.addEventListener('click', e => {
+        if (e.target.closest('.fav-remove')) return
+        const f = favs[parseInt(el.dataset.idx)]
+        selectLocation({ lat: f.lat, lng: f.lng, name: f.name || f.label, label: f.label })
       })
-    ), 300)
+    })
+    list.querySelectorAll('.fav-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        storeFavorites(favs.filter((_, i) => i !== parseInt(btn.dataset.idx)))
+        renderFavorites()
+      })
+    })
+  }
+
+  // ── Select a location (from any source) ───────────────────────────────────
+  function selectLocation(loc) {
+    selectedLocation = loc
+    destInput.value = loc.name || loc.label
+    suggestions.innerHTML = ''
+    suggestions.classList.remove('open')
+    selectedEl.textContent = loc.label
+    selectedEl.style.display = 'block'
+    selectedEl.classList.add('open')
+    goBtn.disabled = false
+    const alreadyFav = loadFavorites().some(f => f.label === loc.label)
+    saveFavRow.style.display = alreadyFav ? 'none' : ''
+  }
+
+  // ── Recents dropdown ───────────────────────────────────────────────────────
+  function showRecents() {
+    const recents = loadRecents()
+    if (!recents.length) { suggestions.classList.remove('open'); return }
+    suggestions.innerHTML = recents.map(r => `
+      <div class="suggestion" data-lat="${r.lat}" data-lng="${r.lng}"
+           data-name="${esc(r.name || r.label)}" data-label="${esc(r.label)}">
+        <div class="sug-icon">↺</div>
+        <div class="sug-body">
+          <div class="sug-name">${esc(r.name || r.label)}</div>
+          ${r.label !== (r.name || '') ? `<div class="sug-addr">${esc(r.label)}</div>` : ''}
+        </div>
+      </div>`).join('')
+    suggestions.classList.add('open')
+    attachSuggestionClicks(loc => selectLocation(loc))
+  }
+
+  function attachSuggestionClicks(onSelect) {
+    suggestions.querySelectorAll('.suggestion').forEach(el => {
+      el.addEventListener('click', () => {
+        const loc = el.dataset.placeId
+          ? null  // handled separately in fetchAutocompleteSuggestions
+          : { lat: parseFloat(el.dataset.lat), lng: parseFloat(el.dataset.lng),
+              name: el.dataset.name, label: el.dataset.label }
+        if (loc) onSelect(loc)
+      })
+    })
+  }
+
+  // ── Autocomplete ───────────────────────────────────────────────────────────
+  async function fetchAutocompleteSuggestions(q) {
+    const { AutocompleteSuggestion } = await google.maps.importLibrary('places')
+    const { suggestions: preds } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: q })
+    if (!preds?.length) { suggestions.classList.remove('open'); return }
+    suggestions.innerHTML = preds.slice(0, 5).map(p => {
+      const pred = p.placePrediction
+      return `<div class="suggestion" data-place-id="${esc(pred.placeId)}">
+        <div class="sug-icon">⊙</div>
+        <div class="sug-body">
+          <div class="sug-name">${esc(pred.mainText.text)}</div>
+          <div class="sug-addr">${esc(pred.secondaryText?.text ?? '')}</div>
+        </div>
+      </div>`
+    }).join('')
+    suggestions.classList.add('open')
+    suggestions.querySelectorAll('.suggestion[data-place-id]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const name = el.querySelector('.sug-name').textContent
+        const { Place } = await google.maps.importLibrary('places')
+        const place = new Place({ id: el.dataset.placeId })
+        await place.fetchFields({ fields: ['location', 'formattedAddress'] })
+        selectLocation({ lat: place.location.lat(), lng: place.location.lng(),
+                         name, label: place.formattedAddress })
+      })
+    })
+  }
+
+  // ── Input events ───────────────────────────────────────────────────────────
+  destInput.addEventListener('focus', () => {
+    if (destInput.value.trim().length < 3) showRecents()
   })
 
   destInput.addEventListener('input', () => {
@@ -411,56 +557,56 @@
     selectedLocation = null
     goBtn.disabled = true
     selectedEl.classList.remove('open')
+    saveFavRow.style.display = 'none'
     const q = destInput.value.trim()
-    if (q.length < 3) { suggestions.innerHTML = ''; suggestions.classList.remove('open'); return }
-    debounce = setTimeout(() => fetchSuggestions(q, suggestions, (placeId, name) =>
-      selectPlace(placeId, name, destInput, suggestions, selectedEl, loc => {
-        selectedLocation = loc
-        goBtn.disabled = false
-      })
-    ), 300)
+    if (q.length < 3) { showRecents(); return }
+    const coords = parseLatLng(q)
+    if (coords) {
+      suggestions.innerHTML = `
+        <div class="suggestion" data-lat="${coords.lat}" data-lng="${coords.lng}"
+             data-name="${esc(coords.name)}" data-label="${esc(coords.label)}">
+          <div class="sug-icon">⊕</div>
+          <div class="sug-body">
+            <div class="sug-name">${esc(coords.name)}</div>
+            <div class="sug-addr">Navigate to coordinates</div>
+          </div>
+        </div>`
+      suggestions.classList.add('open')
+      attachSuggestionClicks(loc => selectLocation(loc))
+      return
+    }
+    debounce = setTimeout(() => fetchAutocompleteSuggestions(q), 300)
   })
 
-  async function fetchSuggestions(q, suggEl, onSelect) {
-    const { AutocompleteSuggestion } = await google.maps.importLibrary('places')
-    const { suggestions: preds } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: q })
-    if (!preds?.length) { suggEl.classList.remove('open'); return }
-    suggEl.innerHTML = preds.slice(0, 5).map(p => {
-      const pred = p.placePrediction
-      return `
-        <div class="suggestion" data-place-id="${pred.placeId}">
-          <div class="sug-name">${pred.mainText.text}</div>
-          <div class="sug-addr">${pred.secondaryText?.text ?? ''}</div>
-        </div>`
-    }).join('')
-    suggEl.classList.add('open')
-    suggEl.querySelectorAll('.suggestion').forEach(el => {
-      el.addEventListener('click', () => onSelect(el.dataset.placeId, el.querySelector('.sug-name').textContent))
-    })
-  }
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#suggestions') && e.target !== destInput)
+      suggestions.classList.remove('open')
+  })
 
-  async function selectPlace(placeId, name, inputEl, suggEl, selectedEl, onLocation) {
-    const { Place } = await google.maps.importLibrary('places')
-    const place = new Place({ id: placeId })
-    await place.fetchFields({ fields: ['location', 'formattedAddress'] })
-    const loc = { lat: place.location.lat(), lng: place.location.lng(), label: place.formattedAddress }
-    inputEl.value = name
-    suggEl.innerHTML = ''
-    suggEl.classList.remove('open')
-    selectedEl.textContent = loc.label
-    selectedEl.style.display = 'block'
-    selectedEl.classList.add('open')
-    onLocation(loc)
-  }
+  // ── Save to favorites ──────────────────────────────────────────────────────
+  saveFavBtn.addEventListener('click', () => {
+    if (!selectedLocation) return
+    const favs = loadFavorites()
+    if (!favs.some(f => f.label === selectedLocation.label)) {
+      favs.push({ name: selectedLocation.name || selectedLocation.label,
+                  label: selectedLocation.label,
+                  lat: selectedLocation.lat, lng: selectedLocation.lng })
+      storeFavorites(favs)
+      renderFavorites()
+    }
+    saveFavRow.style.display = 'none'
+  })
 
+  // ── Navigate ───────────────────────────────────────────────────────────────
   goBtn.addEventListener('click', async () => {
     if (!selectedLocation) {
       setStatus('Geocoding…', '')
       try { selectedLocation = await geocode(destInput.value.trim()) }
       catch { setStatus('Address not found', 'error'); return }
     }
+    addRecent(selectedLocation)
     sessionStorage.setItem('g2maps_destination', JSON.stringify(selectedLocation))
-    setStatus(`Routing to ${selectedLocation.label}…`, 'active')
+    setStatus(`Routing to ${selectedLocation.label || selectedLocation.name}…`, 'active')
     goBtn.disabled = true
     try {
       await startNavigation()
@@ -475,6 +621,8 @@
     statusEl.textContent = msg
     statusEl.className = 'status ' + cls
   }
+
+  renderFavorites()
 
   // ── Controls tab ───────────────────────────────────────────────────────────
   let isPaused  = false

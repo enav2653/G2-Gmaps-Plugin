@@ -908,7 +908,6 @@ export async function menuEndNavigation() {
   stepIdx  = 0
   navState = 'idle'
   sessionStorage.removeItem('g2maps_destination')
-  sessionStorage.removeItem('g2maps_origin')
   await buildPage()
 }
 
@@ -938,31 +937,22 @@ export async function startNavigation() {
   await buildPage()
 
   const dest   = JSON.parse(raw) as { lat: number; lng: number; label: string }
-  const rawOrg = sessionStorage.getItem('g2maps_origin')
 
   try {
     // Always probe Android/bridge — sets activeLocationProvider for live polling
-    // even when an origin address is already known.
     reportStatus('probing Android location…')
     const bridgeLoc = await tryBridgeLocation()
 
-    if (rawOrg) {
-      // Use typed origin as starting point (more reliable than live GPS for routing)
-      const org  = JSON.parse(rawOrg) as { lat: number; lng: number; label: string }
-      currentLat = org.lat
-      currentLng = org.lng
-      reportStatus(`origin: ${org.label}`)
-      if (bridgeLoc) reportStatus('android GPS active for live tracking')
-    } else if (bridgeLoc) {
+    if (bridgeLoc) {
       currentLat = bridgeLoc.lat
       currentLng = bridgeLoc.lng
       reportStatus(`android GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
     } else {
-      // Fall back to WebView geolocation (blocked in Even Hub — prompts user to set origin)
+      // Fall back to WebView geolocation
       reportStatus('trying WebView GPS…')
       try {
         const pos = await new Promise<GeolocationPosition>((res, rej) => {
-          const timer = setTimeout(() => rej(new Error('GPS timed out — enter a starting address')), 5000)
+          const timer = setTimeout(() => rej(new Error('GPS timed out')), 5000)
           navigator.geolocation.getCurrentPosition(
             p => { clearTimeout(timer); res(p) },
             e => { clearTimeout(timer); rej(new Error(`GPS error ${e.code}: ${e.message}`)) },
@@ -974,7 +964,6 @@ export async function startNavigation() {
         reportStatus(`WebView GPS: ${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`)
       } catch (gpsErr) {
         reportStatus(`GPS failed: ${gpsErr instanceof Error ? gpsErr.message : String(gpsErr)}`)
-        reportStatus('enter a starting address to navigate')
         navState = 'idle'
         await buildPage()
         return

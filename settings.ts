@@ -17,7 +17,7 @@ export const DEFAULT_SETTINGS: HudSettings = {
 
 export function loadSettings(): HudSettings {
   try {
-    const raw = sessionStorage.getItem('g2maps_settings_v2')
+    const raw = localStorage.getItem('g2maps_settings_v2')
     if (!raw) return DEFAULT_SETTINGS
     return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
   } catch {
@@ -26,5 +26,5 @@ export function loadSettings(): HudSettings {
 }
 
 export function saveSettings(s: HudSettings): void {
-  sessionStorage.setItem('g2maps_settings_v2', JSON.stringify(s))
+  localStorage.setItem('g2maps_settings_v2', JSON.stringify(s))
 }
