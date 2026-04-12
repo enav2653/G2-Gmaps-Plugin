@@ -384,6 +384,20 @@
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
 
+  // ── Persistent storage: localStorage + cookie fallback ─────────────────────
+  // Flutter InAppWebView may clear localStorage between launches. Cookies
+  // use Android CookieManager which has a separate lifecycle and persists.
+  function persistGet(key) {
+    try { const v = localStorage.getItem(key); if (v !== null) return v } catch {}
+    const m = document.cookie.split('; ').find(r => r.startsWith(encodeURIComponent(key) + '='))
+    return m ? decodeURIComponent(m.split('=')[1]) : null
+  }
+  function persistSet(key, value) {
+    try { localStorage.setItem(key, value) } catch {}
+    const exp = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toUTCString()
+    document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}; expires=${exp}; path=/; SameSite=Lax`
+  }
+
   // ── Diagnostics ───────────────────────────────────────────────────────────
   const debugLog = document.getElementById('debug-log')
   const debugToggle = document.getElementById('debug-visible')
@@ -391,10 +405,10 @@
   function setDebugVisible(on) {
     debugLog.style.display = on ? 'block' : 'none'
     debugToggle.checked = on
-    localStorage.setItem('g2maps_debug', on ? '1' : '0')
+    persistSet('g2maps_debug', on ? '1' : '0')
   }
   // Restore saved state (default off)
-  setDebugVisible(localStorage.getItem('g2maps_debug') === '1')
+  setDebugVisible(persistGet('g2maps_debug') === '1')
   debugToggle.addEventListener('change', () => setDebugVisible(debugToggle.checked))
 
   function appendDebug(msg) {
@@ -441,18 +455,18 @@
 
   // ── Persistence helpers ────────────────────────────────────────────────────
   function loadFavorites() {
-    try { return JSON.parse(localStorage.getItem('g2maps_favorites') || '[]') } catch { return [] }
+    try { return JSON.parse(persistGet('g2maps_favorites') || '[]') } catch { return [] }
   }
   function storeFavorites(favs) {
-    localStorage.setItem('g2maps_favorites', JSON.stringify(favs))
+    persistSet('g2maps_favorites', JSON.stringify(favs))
   }
   function loadRecents() {
-    try { return JSON.parse(localStorage.getItem('g2maps_recents') || '[]') } catch { return [] }
+    try { return JSON.parse(persistGet('g2maps_recents') || '[]') } catch { return [] }
   }
   function addRecent(loc) {
     let recents = loadRecents().filter(r => r.label !== loc.label)
     recents.unshift({ name: loc.name || loc.label, label: loc.label, lat: loc.lat, lng: loc.lng })
-    localStorage.setItem('g2maps_recents', JSON.stringify(recents.slice(0, 5)))
+    persistSet('g2maps_recents', JSON.stringify(recents.slice(0, 5)))
   }
 
   // ── Lat/lng detection ──────────────────────────────────────────────────────
