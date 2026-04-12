@@ -76,7 +76,7 @@ export function bannerModeLabel(m: BannerMode): string {
 
 // ─── Nav states ──────────────────────────────────────────────────────────────
 
-export type NavState = 'navigating' | 'paused' | 'passive' | 'idle'
+export type NavState = 'navigating' | 'paused' | 'passive' | 'idle' | 'calibrating'
 
 // ─── Banner content ───────────────────────────────────────────────────────────
 
@@ -87,9 +87,10 @@ export function buildBannerText(
   bannerMode: BannerMode,
   liveDistM?: number,
 ): string {
-  if (state === 'idle')    return 'G2 Maps  •  Set a destination'
-  if (state === 'passive') return 'Passive map  •  No active route'
-  if (state === 'paused')  return 'Navigation paused  •  Tap to resume'
+  if (state === 'idle')        return 'G2 Maps  •  Set a destination'
+  if (state === 'passive')     return 'Passive map  •  No active route'
+  if (state === 'paused')      return 'Navigation paused  •  Tap to resume'
+  if (state === 'calibrating') return 'Compass Calibration\nWave phone in figure-8 pattern'
 
   const step = steps[stepIdx]
   if (!step) return 'Finding location…'
@@ -184,23 +185,19 @@ export function buildMinimapTextContainer(
   })
 }
 
-/** Minimap image containers — 3×3 grid of 50×50 tiles. Returns [] if hidden. */
+/** Minimap image container — single full-size image. Returns [] if hidden. */
 export function buildMinimapImageContainers(
   settings: HudSettings,
 ): ImageContainerProperty[] {
   if (!settings.minimap.visible) return []
-  return Array.from({ length: MINIMAP_COLS * MINIMAP_ROWS }, (_, idx) => {
-    const col = idx % MINIMAP_COLS
-    const row = Math.floor(idx / MINIMAP_COLS)
-    return new ImageContainerProperty({
-      containerID:   MAP_TILE_CIDS[idx],
-      containerName: `minimap_${col}_${row}`,
-      xPosition:     MAP_PAD_L + col * MINIMAP_TILE_W,
-      yPosition:     MINIMAP_Y + row * MINIMAP_TILE_H,
-      width:         MINIMAP_TILE_W,
-      height:        MINIMAP_TILE_H,
-    })
-  })
+  return [new ImageContainerProperty({
+    containerID:   MAP_TILE_CIDS[0],
+    containerName: 'minimap',
+    xPosition:     MAP_PAD_L,
+    yPosition:     MINIMAP_Y,
+    width:         MINIMAP_IMG_W,
+    height:        MINIMAP_IMG_H,
+  })]
 }
 
 /** Speed stack text container — bottom-right. Returns null if hidden. */
