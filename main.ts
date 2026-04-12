@@ -315,16 +315,22 @@ async function pollLocation() {
 
   // ─── Media state ──────────────────────────────────────────────────────────
   const prevMediaPlaying = mediaPlaying
+  const prevMediaTitle   = mediaTitle
+  const prevMediaArtist  = mediaArtist
   if (loc.mediaTitle   !== undefined) mediaTitle   = loc.mediaTitle
   if (loc.mediaArtist  !== undefined) mediaArtist  = loc.mediaArtist
   if (loc.mediaPlaying !== undefined) mediaPlaying = loc.mediaPlaying
   const mediaStateChanged = prevMediaPlaying !== mediaPlaying
+  const trackChanged = mediaPlaying && !mediaStateChanged &&
+    (mediaTitle !== prevMediaTitle || mediaArtist !== prevMediaArtist)
   if (mediaStateChanged) {
     if (mediaPlaying) {
       reportStatus(`media: playing — ${mediaTitle} / ${mediaArtist}`)
     } else {
       reportStatus('media: stopped')
     }
+  } else if (trackChanged) {
+    reportStatus(`media: track — ${mediaTitle} / ${mediaArtist}`)
   }
 
   if (navState !== 'navigating') {
