@@ -319,6 +319,13 @@ async function pollLocation() {
   if (loc.mediaArtist  !== undefined) mediaArtist  = loc.mediaArtist
   if (loc.mediaPlaying !== undefined) mediaPlaying = loc.mediaPlaying
   const mediaStateChanged = prevMediaPlaying !== mediaPlaying
+  if (mediaStateChanged) {
+    if (mediaPlaying) {
+      reportStatus(`media: playing — ${mediaTitle} / ${mediaArtist}`)
+    } else {
+      reportStatus('media: stopped')
+    }
+  }
 
   if (navState !== 'navigating') {
     if (mediaStateChanged) {
