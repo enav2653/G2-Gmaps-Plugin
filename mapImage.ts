@@ -59,19 +59,19 @@ function encodeGreyscale4BitBmp(width: number, height: number, pixels: Uint8Arra
   return bmp
 }
 
-// ─── 8×8 bitmap glyphs for compass labels ────────────────────────────────────
+// ─── 7×7 bitmap glyphs for compass labels ────────────────────────────────────
 //
-// Nearest-neighbour upscale of the original 5×5 designs to 8×8 (~60% larger).
-// Each entry is 8 rows; each row is an 8-bit mask (MSB = left pixel).
+// Hand-drawn at 7×7 with single-pixel-wide strokes so they match the
+// crispness of the Bresenham route lines. Each row is a 7-bit mask (MSB = left).
 
 const COMPASS_GLYPHS: Record<string, number[]> = {
-  N: [0b11000001, 0b11000001, 0b11110001, 0b11110001, 0b11001001, 0b11000111, 0b11000111, 0b11000001],
-  S: [0b00111110, 0b00111110, 0b11000000, 0b11000000, 0b00111110, 0b00000001, 0b00000001, 0b00111110],
-  E: [0b11111111, 0b11111111, 0b11000000, 0b11000000, 0b11111000, 0b11000000, 0b11000000, 0b11111111],
-  W: [0b11000001, 0b11000001, 0b11000001, 0b11000001, 0b11001001, 0b11110111, 0b11110111, 0b11000001],
+  N: [0b1000001, 0b1100001, 0b1010001, 0b1001001, 0b1000101, 0b1000011, 0b1000001],
+  S: [0b0111110, 0b1000000, 0b1000000, 0b0111110, 0b0000001, 0b0000001, 0b0111110],
+  E: [0b1111111, 0b1000000, 0b1000000, 0b1111100, 0b1000000, 0b1000000, 0b1111111],
+  W: [0b1000001, 0b1000001, 0b1000001, 0b1010101, 0b1010101, 0b0100010, 0b0100010],
 }
-const GLYPH_W = 8
-const GLYPH_H = 8
+const GLYPH_W = 7
+const GLYPH_H = 7
 
 // ─── Vector minimap renderer ──────────────────────────────────────────────────
 //
@@ -104,25 +104,33 @@ function renderPixels(
   h: number,
   zoom: number,
   roads: Array<Array<[number, number]>> = [],
+  headingDeg = 0,
 ): Uint8Array {
   const METERS_PER_DEG = 111_320
   const cosLat = Math.cos(lat * Math.PI / 180)
   const mpp = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
   const cx = w / 2
   const cy = h / 2
+  const cosH = Math.cos(headingDeg * Math.PI / 180)
+  const sinH = Math.sin(headingDeg * Math.PI / 180)
 
   const pixels = new Uint8Array(w * h).fill(0)
 
   function toPixel(plat: number, plng: number): [number, number] {
-    const px = cx + (plng - lng) * cosLat * METERS_PER_DEG / mpp
-    const py = cy - (plat - lat) * METERS_PER_DEG / mpp
-    return [Math.round(px), Math.round(py)]
+    const rx = (plng - lng) * cosLat * METERS_PER_DEG / mpp
+    const ry = (plat - lat) * METERS_PER_DEG / mpp
+    return [Math.round(cx + rx * cosH - ry * sinH), Math.round(cy - (rx * sinH + ry * cosH))]
   }
 
   function setPixel(x: number, y: number, v: number) {
     if (x >= 0 && x < w && y >= 0 && y < h) {
       if (v > pixels[y * w + x]) pixels[y * w + x] = v
     }
+  }
+
+  // forcePixel always writes — used for the position pin so it sits on top of everything
+  function forcePixel(x: number, y: number, v: number) {
+    if (x >= 0 && x < w && y >= 0 && y < h) pixels[y * w + x] = v
   }
 
   // Bresenham line — draws extra pixel for thick lines (current step)
@@ -184,6 +192,25 @@ function renderPixels(
       const [px1, py1] = toPixel(pts[j + 1][0], pts[j + 1][1])
       drawLine(px0, py0, px1, py1, v, thick)
     }
+
+    // Close any pixel gap at the junction between this step and the next.
+    // Google's polylines share the endpoint in theory but rounding to pixels
+    // can leave a 1-px break.  Use the dimmer of the two adjacent brightnesses
+    // so the join doesn't flash brighter than either segment.
+    if (i + 1 < steps.length && pts.length > 0) {
+      const ns = steps[i + 1]
+      const np: Array<[number, number]> = ns.polylinePoints.length >= 2
+        ? ns.polylinePoints
+        : (ns.startLat || ns.startLng) && (ns.endLat || ns.endLng)
+          ? [[ns.startLat, ns.startLng], [ns.endLat, ns.endLng]]
+          : []
+      if (np.length > 0) {
+        const nv  = i + 1 < stepIdx ? 50 : i + 1 === stepIdx ? 240 : 130
+        const [px0, py0] = toPixel(pts[pts.length - 1][0], pts[pts.length - 1][1])
+        const [px1, py1] = toPixel(np[0][0], np[0][1])
+        drawLine(px0, py0, px1, py1, Math.min(v, nv), false)
+      }
+    }
   }
 
   // ── Next turn marker — small cross at end of current step ─────────────────────
@@ -197,14 +224,6 @@ function renderPixels(
     }
   }
 
-  // ── Position marker — filled diamond at current position ──────────────────────
-  const [posX, posY] = toPixel(lat, lng)
-  setPixel(posX,     posY,     255)
-  setPixel(posX + 1, posY,     255); setPixel(posX - 1, posY,     255)
-  setPixel(posX,     posY + 1, 255); setPixel(posX,     posY - 1, 255)
-  setPixel(posX + 1, posY + 1, 200); setPixel(posX - 1, posY + 1, 200)
-  setPixel(posX + 1, posY - 1, 200); setPixel(posX - 1, posY - 1, 200)
-
   // ── Corner brackets ───────────────────────────────────────────────────────────
   const CL = 12  // arm length in pixels
   const CV = 180 // brightness
@@ -217,19 +236,63 @@ function renderPixels(
 
   // ── Compass labels — N/S/E/W placed on the largest inscribed circle ───────────
   //
-  // The circle has radius r = min(w,h)/2. Each glyph (5×5) is positioned so
-  // its outermost edge (the face furthest from centre) touches the circle.
+  // Glyphs rotate with the map so they always show true cardinal directions.
+  // Glyph centers are placed at radius (r − GLYPH_H/2) so the outer edge
+  // stays inside the inscribed circle at any heading.
   {
     const r  = Math.min(w, h) / 2
-    const gc = 200  // glyph brightness
-    // N — top edge of glyph at y = cy − r
-    drawGlyph('N', Math.round(cx - GLYPH_W / 2), Math.round(cy - r),                  gc)
-    // S — bottom edge of glyph at y = cy + r − 1
-    drawGlyph('S', Math.round(cx - GLYPH_W / 2), Math.round(cy + r) - GLYPH_H,        gc)
-    // E — right edge of glyph at x = cx + r − 1
-    drawGlyph('E', Math.round(cx + r) - GLYPH_W, Math.round(cy - GLYPH_H / 2),        gc)
-    // W — left edge of glyph at x = cx − r
-    drawGlyph('W', Math.round(cx - r),            Math.round(cy - GLYPH_H / 2),        gc)
+    const gr = r - GLYPH_H / 2  // glyph-centre radius
+    const gc = 200
+    const pad = 2  // dark badge padding around each glyph
+    for (const [label, cardDeg] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]] as [string, number][]) {
+      const a  = (cardDeg - headingDeg) * Math.PI / 180
+      const lx = Math.round(cx + gr * Math.sin(a) - GLYPH_W / 2)
+      const ly = Math.round(cy - gr * Math.cos(a) - GLYPH_H / 2)
+      // Black badge so the glyph stays legible over any route line or road
+      for (let gy = ly - pad; gy < ly + GLYPH_H + pad; gy++)
+        for (let gx = lx - pad; gx < lx + GLYPH_W + pad; gx++)
+          forcePixel(gx, gy, 0)
+      drawGlyph(label, lx, ly, gc)
+    }
+  }
+
+  // ── Position arrow — navigation chevron drawn last so it is always on top ────
+  //
+  // 2× scaled (18 wide × 14 tall). Each logical pixel → 2×2 screen pixels.
+  // Logical centre (col 4, row 3) maps to (posX, posY).
+  // Tip always points screen-up = heading direction on a heading-up map.
+  //
+  //   col: -8..+9 screen pixels (logical cols 0-8, ×2 offset -8)
+  //         .  .  .  .  X  .  .  .  .   row 0  ← tip
+  //         .  .  .  X  X  X  .  .  .   row 1
+  //         .  .  X  X  X  X  X  .  .   row 2
+  //         .  X  X  X  X  X  X  X  .   row 3  ← centre (posX, posY)
+  //         X  X  X  X  X  X  X  X  X   row 4  ← widest
+  //         X  X  .  .  .  .  .  X  X   row 5  ← wings
+  //         .  X  .  .  .  .  .  X  .   row 6  ← flying-V notch
+  //
+  // Brightness = midpoint between current-step route (240) and background roads (40).
+  {
+    const [posX, posY] = toPixel(lat, lng)
+    const PV = 140
+    const shape = [
+      [0,0,0,0,1,0,0,0,0],  // row 0  tip
+      [0,0,0,1,1,1,0,0,0],  // row 1
+      [0,0,1,1,1,1,1,0,0],  // row 2
+      [0,1,1,1,1,1,1,1,0],  // row 3  centre
+      [1,1,1,1,1,1,1,1,1],  // row 4  widest
+      [1,1,0,0,0,0,0,1,1],  // row 5  wings
+      [0,1,0,0,0,0,0,1,0],  // row 6  notch
+    ]
+    for (let row = 0; row < shape.length; row++)
+      for (let col = 0; col < 9; col++)
+        if (shape[row][col]) {
+          // Each logical pixel → 2×2 block; centre (col 4, row 3) → (posX, posY)
+          forcePixel(posX + col*2 - 8, posY + row*2 - 6, PV)
+          forcePixel(posX + col*2 - 7, posY + row*2 - 6, PV)
+          forcePixel(posX + col*2 - 8, posY + row*2 - 5, PV)
+          forcePixel(posX + col*2 - 7, posY + row*2 - 5, PV)
+        }
   }
 
   return pixels
@@ -239,16 +302,18 @@ export function renderMinimapBmp(
   lat: number, lng: number, steps: StepCoords[], stepIdx: number,
   w: number, h: number, zoom: number,
   roads: Array<Array<[number, number]>> = [],
+  headingDeg = 0,
 ): number[] {
-  return Array.from(encodeGreyscale4BitBmp(w, h, renderPixels(lat, lng, steps, stepIdx, w, h, zoom, roads)))
+  return Array.from(encodeGreyscale4BitBmp(w, h, renderPixels(lat, lng, steps, stepIdx, w, h, zoom, roads, headingDeg)))
 }
 
 export function renderMinimapBmpTiles(
   lat: number, lng: number, steps: StepCoords[], stepIdx: number,
   totalW: number, totalH: number, tileW: number, tileH: number, zoom: number,
   roads: Array<Array<[number, number]>> = [],
+  headingDeg = 0,
 ): number[][] {
-  const pixels = renderPixels(lat, lng, steps, stepIdx, totalW, totalH, zoom, roads)
+  const pixels = renderPixels(lat, lng, steps, stepIdx, totalW, totalH, zoom, roads, headingDeg)
   const cols = totalW / tileW
   const rows = totalH / tileH
   const tiles: number[][] = []
@@ -264,186 +329,83 @@ export function renderMinimapBmpTiles(
   return tiles
 }
 
-async function encodeGreyscalePng(width: number, height: number, pixels: Uint8Array): Promise<Uint8Array> {
-  const sig  = new Uint8Array([137,80,78,71,13,10,26,10])
-  const ihdrData = new Uint8Array(13)
-  writeU32BE(ihdrData, 0, width); writeU32BE(ihdrData, 4, height)
-  ihdrData[8]=8; ihdrData[9]=0; ihdrData[10]=0; ihdrData[11]=0; ihdrData[12]=0
-  const ihdr = makePngChunk('IHDR', ihdrData)
-  const raw  = new Uint8Array(height * (1 + width))
-  for (let y = 0; y < height; y++) {
-    raw[y*(1+width)] = 0
-    raw.set(pixels.subarray(y*width, (y+1)*width), y*(1+width)+1)
-  }
-  const idat = makePngChunk('IDAT', await zlibCompress(raw))
-  const iend = makePngChunk('IEND', new Uint8Array(0))
-  const png  = new Uint8Array(sig.length + ihdr.length + idat.length + iend.length)
-  let off = 0
-  png.set(sig,  off); off += sig.length
-  png.set(ihdr, off); off += ihdr.length
-  png.set(idat, off); off += idat.length
-  png.set(iend, off)
-  return png
-}
-
-// ─── Heading-aligned background ───────────────────────────────────────────────
+// ─── Compass calibration screen ───────────────────────────────────────────────
 //
-// Fetch a square map image large enough that, after rotating by headingDeg and
-// cropping to w×h, no black corners appear.  Diagonal = √(w²+h²).
+// Replaces the minimap during the initial figure-8 calibration routine.
+// Draws three vertical progress bars: rotation (α), tilt (β), roll (γ).
+// Each bar fills bottom-up; a checkmark appears below when that axis is done.
 
-async function fetchHeadingUpBackground(
-  lat: number, lng: number,
+/** Renders a compass calibration progress graphic as a single BMP.
+ *  rotPct / tiltPct / rollPct are each 0–1. */
+function renderCalibrationPixels(
+  rotPct: number, tiltPct: number, rollPct: number,
   w: number, h: number,
-  zoom: number, headingDeg: number,
-  log?: (msg: string) => void,
-): Promise<Uint8Array> {
-  const diag = Math.ceil(Math.sqrt(w * w + h * h)) + 2
-  let src: Uint8Array
+): Uint8Array {
+  const pixels = new Uint8Array(w * h).fill(3)  // dark background
 
-  try {
-    const blob = await fetchMapSnapshot(lat, lng, diag, diag, zoom)
-    src = await imageBlobToGreyscale8bit(blob, diag, diag)
-    // Scale brightness: roads ~28–73, highways ~73 — leaves 240 for route overlay
-    for (let i = 0; i < src.length; i++) src[i] = Math.round(src[i] * 0.55)
-  } catch (e) {
-    log?.(`minimap bg: ${e instanceof Error ? e.message : String(e)}`)
-    src = new Uint8Array(diag * diag).fill(35)
+  function px(x: number, y: number, v: number) {
+    if (x >= 0 && x < w && y >= 0 && y < h) pixels[y * w + x] = v
+  }
+  function rect(x0: number, y0: number, x1: number, y1: number, v: number) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) px(x, y, v)
+  }
+  function icon(m: number[][], ox: number, oy: number, v: number) {
+    for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) if (m[r][c]) px(ox+c, oy+r, v)
   }
 
-  // Rotate src (diag×diag) by headingDeg → crop centre w×h
-  const dst = new Uint8Array(w * h)
-  const θ    = headingDeg * Math.PI / 180
-  const cosθ = Math.cos(θ), sinθ = Math.sin(θ)
-  const srcCx = diag / 2, srcCy = diag / 2
-  const dstCx = w / 2,   dstCy = h / 2
+  const ICO_ROT: number[][] = [
+    [0,0,1,1,1,0,0,0,0], [0,1,0,0,0,1,0,0,0], [0,0,0,0,0,1,0,0,0],
+    [0,0,0,0,1,1,1,0,0], [0,1,0,0,0,0,0,0,0], [0,0,1,1,1,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
+  const ICO_TILT: number[][] = [
+    [0,0,0,1,0,0,0,0,0], [0,0,1,1,1,0,0,0,0], [0,0,0,1,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,1,0,0,0,0,0], [0,0,1,1,1,0,0,0,0],
+    [0,0,0,1,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
+  const ICO_ROLL: number[][] = [
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0], [0,1,0,0,0,0,0,1,0],
+    [1,1,1,0,0,0,1,1,1], [0,1,0,0,0,0,0,1,0], [0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
+  const ICO_CHECK: number[][] = [
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,1,0,0,0], [0,0,0,0,1,0,0,0,0],
+    [1,0,0,1,0,0,0,0,0], [0,1,1,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0,0],
+  ]
 
-  for (let oy = 0; oy < h; oy++) {
-    for (let ox = 0; ox < w; ox++) {
-      const dx = ox - dstCx, dy = oy - dstCy
-      // Inverse map: output pixel → input pixel
-      const ix = Math.round(srcCx + dx * cosθ - dy * sinθ)
-      const iy = Math.round(srcCy + dx * sinθ + dy * cosθ)
-      if (ix >= 0 && ix < diag && iy >= 0 && iy < diag) {
-        dst[oy * w + ox] = src[iy * diag + ix]
-      }
-    }
+  const BAR_W  = 14, BAR_H = 76, BAR_Y = 32
+  const BAR_XS = [22, 55, 88]
+  const PCTS   = [rotPct, tiltPct, rollPct]
+  const ICONS  = [ICO_ROT, ICO_TILT, ICO_ROLL]
+
+  for (let i = 0; i < 3; i++) {
+    const bx = BAR_XS[i]
+    const p  = Math.min(1, Math.max(0, PCTS[i]))
+
+    icon(ICONS[i], bx + 2, 8, 11)
+    rect(bx, BAR_Y, bx + BAR_W, BAR_Y + BAR_H, 6)
+    rect(bx + 1, BAR_Y + 1, bx + BAR_W - 1, BAR_Y + BAR_H - 1, 2)
+
+    const fillH = Math.round(BAR_H * p)
+    if (fillH > 0)
+      rect(bx + 1, BAR_Y + BAR_H - fillH, bx + BAR_W - 1, BAR_Y + BAR_H - 1,
+           p >= 1 ? 15 : 11)
+
+    if (p >= 1) icon(ICO_CHECK, bx + 2, BAR_Y + BAR_H + 4, 15)
+    else         rect(bx + 5, BAR_Y + BAR_H + 5, bx + 9, BAR_Y + BAR_H + 8, 5)
   }
-  return dst
+
+  return pixels
 }
 
-// ─── Vector minimap renderer ──────────────────────────────────────────────────
-//
-// Composes background map (heading-rotated) + route overlay + position marker.
-//
-// Brightness guide:
-//   background (roads scaled 55%):   roads ~30–120
-//   past steps:    50
-//   future steps:  160
-//   current step:  240 (3 px thick)
-//   position dot:  255 (white)
-//   turn marker:   255
-
-interface StepCoords {
-  polylinePoints: Array<[number, number]>
-  startLat: number
-  startLng: number
-  endLat: number
-  endLng: number
+/** Renders a compass calibration progress graphic as a single BMP.
+ *  rotPct / tiltPct / rollPct are each 0–1. */
+export function renderCalibrationBmp(
+  rotPct: number, tiltPct: number, rollPct: number,
+  w: number, h: number,
+): number[] {
+  return Array.from(encodeGreyscale4BitBmp(w, h,
+    renderCalibrationPixels(rotPct, tiltPct, rollPct, w, h)))
 }
 
-export async function renderMinimapPng(
-  lat: number,
-  lng: number,
-  steps: StepCoords[],
-  stepIdx: number,
-  w: number,
-  h: number,
-  zoom: number,
-  headingDeg = 0,
-  log?: (msg: string) => void,
-): Promise<number[]> {
-  const pixels = await fetchHeadingUpBackground(lat, lng, w, h, zoom, headingDeg, log)
-
-  const METERS_PER_DEG = 111_320
-  const cosLat = Math.cos(lat * Math.PI / 180)
-  const mpp    = 2 * Math.PI * 6_378_137 * cosLat / (256 * Math.pow(2, zoom))
-  const cx = w / 2, cy = h / 2
-  const θ    = headingDeg * Math.PI / 180
-  const cosθ = Math.cos(θ), sinθ = Math.sin(θ)
-
-  function setPixel(x: number, y: number, v: number) {
-    if (x >= 0 && x < w && y >= 0 && y < h) {
-      if (v > pixels[y * w + x]) pixels[y * w + x] = v
-    }
-  }
-
-  // Geo → screen using heading-aligned projection
-  function toPixel(plat: number, plng: number): [number, number] {
-    const em = (plng - lng) * cosLat * METERS_PER_DEG   // east metres
-    const nm = (plat - lat) * METERS_PER_DEG             // north metres
-    return [
-      Math.round(cx + (em * cosθ - nm * sinθ) / mpp),
-      Math.round(cy - (em * sinθ + nm * cosθ) / mpp),
-    ]
-  }
-
-  function drawLine(x0: number, y0: number, x1: number, y1: number, v: number, thick: boolean) {
-    const dx = Math.abs(x1-x0), dy = Math.abs(y1-y0)
-    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
-    let err = dx - dy
-    for (;;) {
-      setPixel(x0, y0, v)
-      if (thick) {
-        if (dx >= dy) { setPixel(x0, y0+1, v); setPixel(x0, y0-1, v) }
-        else          { setPixel(x0+1, y0, v); setPixel(x0-1, y0, v) }
-      }
-      if (x0 === x1 && y0 === y1) break
-      const e2 = 2 * err
-      if (e2 > -dy) { err -= dy; x0 += sx }
-      if (e2 <  dx) { err += dx; y0 += sy }
-    }
-  }
-
-  // Draw route segments
-  for (let i = 0; i < steps.length; i++) {
-    const s       = steps[i]
-    const current = i === stepIdx
-    const v       = i < stepIdx ? 50 : current ? 240 : 160
-    const thick   = current
-
-    const pts: Array<[number, number]> = s.polylinePoints.length >= 2
-      ? s.polylinePoints
-      : (s.startLat || s.startLng) && (s.endLat || s.endLng)
-        ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
-        : []
-
-    for (let j = 0; j < pts.length - 1; j++) {
-      const [px0, py0] = toPixel(pts[j][0],     pts[j][1])
-      const [px1, py1] = toPixel(pts[j+1][0], pts[j+1][1])
-      drawLine(px0, py0, px1, py1, v, thick)
-    }
-  }
-
-  // Next turn marker — 3×3 bright square at end of current step
-  if (stepIdx < steps.length) {
-    const s = steps[stepIdx]
-    if (s.endLat || s.endLng) {
-      const [tx, ty] = toPixel(s.endLat, s.endLng)
-      for (let dy = -1; dy <= 1; dy++)
-        for (let dx = -1; dx <= 1; dx++)
-          setPixel(tx+dx, ty+dy, 255)
-    }
-  }
-
-  // Position marker — 5×5 white square, clearly visible
-  const [posX, posY] = toPixel(lat, lng)
-  for (let dy = -2; dy <= 2; dy++)
-    for (let dx = -2; dx <= 2; dx++)
-      setPixel(posX+dx, posY+dy, 255)
-
-  // Bright border so we can confirm the container is rendering
-  for (let x = 0; x < w; x++) { setPixel(x, 0, 200); setPixel(x, h-1, 200) }
-  for (let y = 0; y < h; y++) { setPixel(0, y, 200); setPixel(w-1, y, 200) }
-
-  return Array.from(await encodeGreyscalePng(w, h, pixels))
-}
