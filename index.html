@@ -512,7 +512,7 @@
     selectedEl.classList.add('open')
     goBtn.disabled = false
     const alreadyFav = loadFavorites().some(f => f.label === loc.label)
-    saveFavRow.style.display = alreadyFav ? 'none' : ''
+    saveFavRow.style.display = alreadyFav ? 'none' : 'block'
   }
 
   // ── Recents dropdown ───────────────────────────────────────────────────────
