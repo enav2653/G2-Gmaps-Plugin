@@ -176,8 +176,8 @@
 </head>
 <body>
 
-<!-- ── Debug log (always visible) ── -->
-<div id="debug-log" style="position:fixed;bottom:0;left:0;right:0;max-height:90px;overflow-y:auto;background:#0a0a12;border-top:1px solid #333;font-size:10px;font-family:monospace;color:#4ade80;padding:4px 8px;z-index:999"></div>
+<!-- ── Debug log (hidden by default; toggle in Settings) ── -->
+<div id="debug-log" style="position:fixed;bottom:0;left:0;right:0;max-height:90px;overflow-y:auto;background:#0a0a12;border-top:1px solid #333;font-size:10px;font-family:monospace;color:#4ade80;padding:4px 8px;z-index:999;display:none"></div>
 
 <!-- ── Tab bar ── -->
 <div class="tabs">
@@ -255,6 +255,20 @@
      TAB 3 — HUD Settings
      ══════════════════════════════════════════ -->
 <div class="panel" id="panel-settings">
+
+  <div class="settings-section">Diagnostics</div>
+
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Debug log</div>
+      <div class="toggle-sub">Show status messages at bottom of screen</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="debug-visible">
+      <div class="toggle-bg"></div>
+      <div class="toggle-thumb"></div>
+    </label>
+  </div>
 
   <div class="settings-section">Minimap</div>
 
@@ -372,6 +386,17 @@
 
   // ── Diagnostics ───────────────────────────────────────────────────────────
   const debugLog = document.getElementById('debug-log')
+  const debugToggle = document.getElementById('debug-visible')
+
+  function setDebugVisible(on) {
+    debugLog.style.display = on ? 'block' : 'none'
+    debugToggle.checked = on
+    localStorage.setItem('g2maps_debug', on ? '1' : '0')
+  }
+  // Restore saved state (default off)
+  setDebugVisible(localStorage.getItem('g2maps_debug') === '1')
+  debugToggle.addEventListener('change', () => setDebugVisible(debugToggle.checked))
+
   function appendDebug(msg) {
     const line = document.createElement('div')
     line.textContent = new Date().toISOString().slice(11,19) + ' ' + msg
