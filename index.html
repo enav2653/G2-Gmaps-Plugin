@@ -981,9 +981,9 @@
     //   Ignore flat     : |beta|  < FLAT  (30°) — lying on a table keeps current state
     let lastGamma    = 0
     let inLandscape  = false
-    const L_ENTER = 65   // °  clearly tilted sideways → switch to landscape
-    const L_EXIT  = 20   // °  nearly upright again    → switch back to portrait
-    const L_FLAT  = 30   // °  |beta| below this = phone is too flat to bother
+    const L_ENTER = 60   // °  enter landscape — gamma alone (no beta: avoids gimbal lock at high γ)
+    const L_EXIT  = 20   // °  exit  landscape — 40° hysteresis band
+    const L_FLAT  = 30   // °  |beta| below this = too flat; only blocks EXIT (keeps landscape)
 
     function applyCanvasTransform() {
       if (inLandscape) {
@@ -1016,16 +1016,22 @@
     window.addEventListener('deviceorientation', e => {
       if (e.gamma === null || e.beta === null) return
 
-      // Phone too flat to determine intent — preserve current state
-      if (Math.abs(e.beta) < L_FLAT) return
-
       const prev = inLandscape
-      if (!inLandscape && Math.abs(e.gamma) > L_ENTER) inLandscape = true
-      else if (inLandscape && Math.abs(e.gamma) < L_EXIT) inLandscape = false
 
-      // Keep lastGamma current so rotation direction stays correct
+      if (!inLandscape && Math.abs(e.gamma) > L_ENTER) {
+        // Enter landscape — gamma only; no beta check.
+        // Near γ=±90° the ZXY Euler angles hit gimbal lock so beta is unreliable.
+        inLandscape = true
+
+      } else if (inLandscape && Math.abs(e.gamma) < L_EXIT) {
+        // Exit landscape — only if phone is also upright.
+        // Flat phone (beta < L_FLAT) keeps the landscape state so setting it
+        // down on a table doesn't snap back to portrait.
+        if (Math.abs(e.beta) < L_FLAT) return
+        inLandscape = false
+      }
+
       lastGamma = e.gamma
-
       if (inLandscape !== prev) applyCanvasTransform()
     }, true)
 
