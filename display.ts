@@ -1,7 +1,9 @@
 const MAX_INSTR = 28
 
 export function formatInstruction(text: string, maxLen = MAX_INSTR): string {
-  const stripped = text.replace(/\s+towards?\s+.+$/i, '')
+  const stripped = text
+    .replace(/\n.*/s, '')          // drop supplementary notes (e.g. "Restricted usage road")
+    .replace(/\s+towards?\s+.+$/i, '')
   const abbr = stripped
     .replace(/\bStreet\b/g,    'St')
     .replace(/\bAvenue\b/g,    'Ave')
