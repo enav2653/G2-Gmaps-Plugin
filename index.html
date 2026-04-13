@@ -107,22 +107,6 @@
     .status.error  { color: var(--red); }
     .status.warn   { color: var(--amber); }
 
-    /* ── Menu panel (double-tap actions) ── */
-    .menu-section { padding: 14px 16px 6px; font-size: 10px; text-transform: uppercase;
-                    letter-spacing: 0.08em; color: var(--muted); }
-    .menu-item { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
-                 border-bottom: 0.5px solid var(--border); cursor: pointer;
-                 transition: background 0.1s; }
-    .menu-item:active { background: rgba(255,255,255,0.04); }
-    .menu-item:last-child { border-bottom: none; }
-    .menu-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .menu-text { flex: 1; }
-    .menu-title { font-size: 14px; }
-    .menu-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
-    .menu-item.danger .menu-title { color: var(--red); }
-    .menu-active-pill { font-size: 10px; padding: 3px 8px; border-radius: 20px;
-                        background: rgba(55,138,221,0.15); color: var(--accent);
-                        border: 0.5px solid rgba(55,138,221,0.25); }
 
     /* ── Settings panel ── */
     .settings-section { padding: 14px 16px 6px; font-size: 10px; text-transform: uppercase;
@@ -218,7 +202,6 @@
 <!-- ── Tab bar ── -->
 <div class="tabs">
   <div class="tab active" data-tab="nav">Navigate</div>
-  <div class="tab" data-tab="menu">Controls</div>
   <div class="tab" data-tab="settings">HUD settings</div>
   <div class="tab" data-tab="preview">Preview</div>
 </div>
@@ -249,49 +232,6 @@
   <div class="status" id="status">Enter a destination to begin</div>
 </div>
 
-<!-- ══════════════════════════════════════════
-     TAB 2 — Controls (double-tap menu on phone)
-     ══════════════════════════════════════════ -->
-<div class="panel" id="panel-menu">
-  <div class="menu-section">Navigation</div>
-
-  <div class="menu-item" id="mi-pause">
-    <div class="menu-dot" style="background:var(--amber)"></div>
-    <div class="menu-text">
-      <div class="menu-title" id="mi-pause-title">Pause navigation</div>
-      <div class="menu-sub">GPS tracking stops</div>
-    </div>
-    <div class="menu-active-pill" id="mi-pause-pill" style="display:none">active</div>
-  </div>
-
-  <div class="menu-item" id="mi-passive">
-    <div class="menu-dot" style="background:var(--accent)"></div>
-    <div class="menu-text">
-      <div class="menu-title" id="mi-passive-title">Passive map mode</div>
-      <div class="menu-sub">Minimap + speed only, no directions</div>
-    </div>
-    <div class="menu-active-pill" id="mi-passive-pill" style="display:none">active</div>
-  </div>
-
-  <div class="menu-item" id="mi-end">
-    <div class="menu-dot" style="background:var(--accent)"></div>
-    <div class="menu-text">
-      <div class="menu-title">End navigation</div>
-      <div class="menu-sub">Returns to passive map mode, route preserved</div>
-    </div>
-    <div class="menu-active-pill" id="mi-end-pill" style="display:none">active</div>
-  </div>
-
-  <div class="menu-section" style="margin-top:8px">Banner mode</div>
-
-  <div class="menu-item" id="mi-banner">
-    <div class="menu-dot" style="background:#888"></div>
-    <div class="menu-text">
-      <div class="menu-title" id="mi-banner-title">Always on</div>
-      <div class="menu-sub">Tap glasses to cycle: on → auto → off</div>
-    </div>
-  </div>
-</div>
 
 <!-- ══════════════════════════════════════════
      TAB 3 — HUD Settings
@@ -495,7 +435,7 @@
 
 <script type="module">
   import { geocode }           from './maps.ts'
-  import { startNavigation, menuPauseResume, menuPassiveMode, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState } from './main.ts'
+  import { startNavigation, menuPauseResume, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState } from './main.ts'
   import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './settings.ts'
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
@@ -803,55 +743,6 @@
   }
 
   renderFavorites()
-
-  // ── Controls tab ───────────────────────────────────────────────────────────
-  let isPaused  = false
-  let isPassive = false
-
-  document.getElementById('mi-pause').addEventListener('click', async () => {
-    await menuPauseResume()
-    isPaused = !isPaused
-    document.getElementById('mi-pause-title').textContent = isPaused ? 'Resume navigation' : 'Pause navigation'
-    document.getElementById('mi-pause-pill').style.display = isPaused ? '' : 'none'
-    if (isPaused) { isPassive = false; syncPassiveUI() }
-  })
-
-  document.getElementById('mi-passive').addEventListener('click', async () => {
-    await menuPassiveMode()
-    isPassive = !isPassive
-    document.getElementById('mi-passive-title').textContent = isPassive ? 'Back to navigation' : 'Passive map mode'
-    document.getElementById('mi-passive-pill').style.display = isPassive ? '' : 'none'
-    if (isPassive) {
-      isPaused = false
-      syncPassiveUI()
-      setNavTabState(false)
-      goBtn.disabled = false
-    } else {
-      document.getElementById('mi-end-pill').style.display = 'none'
-      setNavTabState(true)
-    }
-  })
-
-  function syncPassiveUI() {
-    document.getElementById('mi-pause-title').textContent = isPaused ? 'Resume navigation' : 'Pause navigation'
-    document.getElementById('mi-pause-pill').style.display = isPaused ? '' : 'none'
-  }
-
-  document.getElementById('mi-end').addEventListener('click', async () => {
-    await menuGoPassive()
-    isPaused = false
-    isPassive = true
-    syncPassiveUI()
-    document.getElementById('mi-passive-title').textContent = 'Back to navigation'
-    document.getElementById('mi-passive-pill').style.display = ''
-    document.getElementById('mi-end-pill').style.display = ''
-    setNavTabState(false)
-    goBtn.disabled = false
-    setStatus('Passive map mode — route preserved', 'active')
-    document.querySelectorAll('.tab, .panel').forEach(el => el.classList.remove('active'))
-    document.querySelector('[data-tab="nav"]').classList.add('active')
-    document.getElementById('panel-nav').classList.add('active')
-  })
 
   // ── Settings tab ───────────────────────────────────────────────────────────
   const settingsEls = {
