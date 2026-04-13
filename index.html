@@ -182,7 +182,7 @@
     .hud-cam-btn   { font-size: 12px; padding: 7px 14px; background: transparent;
                      border: 0.5px solid var(--border); border-radius: 8px; color: var(--text);
                      cursor: pointer; transition: border-color 0.15s, color 0.15s; }
-    .hud-cam-btn.active { border-color: var(--accent); color: var(--accent); }
+    .hud-cam-btn.active { border-color: var(--green); color: var(--green); }
     .hud-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
                        padding: 12px; background: #000; min-height: 0; }
     #hud-canvas  { width: 100%; max-width: 576px; aspect-ratio: 576/288;
@@ -951,7 +951,8 @@
   // ── Preview (HUD simulator) tab ──────────────────────────────────────────────
   //
   // Draws a pixel-accurate representation of the G2 display (576×288) on a
-  // <canvas>, optionally with the rear camera as a see-through background.
+  // <canvas> in phosphor-green — the native color of the waveguide display.
+  // Optionally uses the rear camera as a see-through background.
   //
   // Layout mirrors hud.ts exactly:
   //   Banner  y=0   h=64          (top strip — instruction + distance + ETA)
@@ -967,6 +968,11 @@
     const MINIMAP_Y = 164, MINIMAP_W = 124, MINIMAP_H = 124
     const SPEED_X   = 512, SPEED_W = 56
     const MEDIA_X   = 130
+
+    // Phosphor-green palette matching the G2 waveguide display
+    const G_BRIGHT = '#00e87a'   // main text
+    const G_DIM    = '#009950'   // secondary / labels
+    const G_FAINT  = '#005c2e'   // borders, dimmed elements
 
     const canvas = document.getElementById('hud-canvas')
     const ctx    = canvas.getContext('2d')
@@ -997,70 +1003,72 @@
 
       // ── Background ──────────────────────────────────────────────────────────
       if (camStream && camVid.readyState >= 2) {
-        // Crop camera frame to 2:1 aspect ratio, then draw
         const vw = camVid.videoWidth || 1, vh = camVid.videoHeight || 1
         const vAR = vw / vh, cAR = HUD_W / HUD_H
         let sx = 0, sy = 0, sw = vw, sh = vh
         if (vAR > cAR) { sw = Math.round(vh * cAR); sx = Math.round((vw - sw) / 2) }
         else            { sh = Math.round(vw / cAR); sy = Math.round((vh - sh) / 2) }
         ctx.drawImage(camVid, sx, sy, sw, sh, 0, 0, HUD_W, HUD_H)
-        // Slight dark tint — simulates the waveguide optical density
-        ctx.fillStyle = 'rgba(0,0,0,0.32)'
+        // Waveguide tint — slight green-tinted dark veil
+        ctx.fillStyle = 'rgba(0,8,4,0.30)'
         ctx.fillRect(0, 0, HUD_W, HUD_H)
       } else {
-        ctx.fillStyle = '#06060d'
+        ctx.fillStyle = '#020d06'
         ctx.fillRect(0, 0, HUD_W, HUD_H)
       }
 
       // ── Banner ───────────────────────────────────────────────────────────────
       if (s.bannerVisible && s.bannerText) {
-        ctx.fillStyle = 'rgba(0,0,0,0.28)'
+        ctx.fillStyle = 'rgba(0,18,8,0.35)'
         ctx.fillRect(0, 0, HUD_W, BANNER_H)
         ctx.textAlign = 'left'
         const lines = s.bannerText.split('\n')
         lines.forEach((line, i) => {
-          ctx.font = i === 0
+          ctx.font      = i === 0
             ? "bold 17px 'Courier New', Courier, monospace"
             : "13px 'Courier New', Courier, monospace"
-          ctx.fillStyle = i === 0 ? '#e8e8f0' : '#a0a0bc'
+          ctx.fillStyle = i === 0 ? G_BRIGHT : G_DIM
           ctx.fillText(line, 6, 22 + i * 21, HUD_W - 12)
         })
       }
 
-      // ── Minimap image ────────────────────────────────────────────────────────
+      // ── Minimap image (green-tinted via canvas filter) ────────────────────────
       if (s.minimapVisible && mapImg.naturalWidth > 0) {
+        ctx.save()
+        // Convert greyscale BMP → phosphor green:
+        // sepia shifts grey to warm brown, hue-rotate + saturate push it to green
+        ctx.filter = 'sepia(1) hue-rotate(82deg) saturate(5) brightness(0.95)'
         ctx.drawImage(mapImg, 0, MINIMAP_Y, MINIMAP_W, MINIMAP_H)
+        ctx.restore()
       } else if (s.minimapVisible) {
-        // Placeholder grid when minimap hasn't rendered yet
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+        ctx.strokeStyle = G_FAINT
         ctx.lineWidth   = 0.5
         ctx.strokeRect(0.5, MINIMAP_Y + 0.5, MINIMAP_W - 1, MINIMAP_H - 1)
-        ctx.fillStyle  = '#0c0c18'
+        ctx.fillStyle   = '#020d06'
         ctx.fillRect(1, MINIMAP_Y + 1, MINIMAP_W - 2, MINIMAP_H - 2)
       }
 
       // ── Speed ────────────────────────────────────────────────────────────────
       if (s.speedVisible && s.speedText) {
-        const parts  = s.speedText.split('\n').filter(l => l !== '─────')
-        const cx     = SPEED_X + SPEED_W / 2
+        const parts = s.speedText.split('\n').filter(l => l !== '─────')
+        const cx    = SPEED_X + SPEED_W / 2
         ctx.textAlign = 'center'
         if (parts[0]) {
           ctx.font      = "bold 26px 'Courier New', Courier, monospace"
-          ctx.fillStyle = '#e8e8f0'
+          ctx.fillStyle = G_BRIGHT
           ctx.fillText(parts[0], cx, BOTTOM_Y + 32)
         }
         if (parts[1]) {
           ctx.font      = "11px 'Courier New', Courier, monospace"
-          ctx.fillStyle = '#7878a0'
+          ctx.fillStyle = G_DIM
           ctx.fillText(parts[1], cx, BOTTOM_Y + 48)
         }
         if (parts[2]) {
-          // Speed limit badge
-          ctx.strokeStyle = 'rgba(255,255,255,0.28)'
+          ctx.strokeStyle = G_FAINT
           ctx.lineWidth   = 0.5
           ctx.strokeRect(SPEED_X + 4, BOTTOM_Y + 55, SPEED_W - 8, 22)
           ctx.font        = "14px 'Courier New', Courier, monospace"
-          ctx.fillStyle   = '#7878a0'
+          ctx.fillStyle   = G_DIM
           ctx.fillText(parts[2], cx, BOTTOM_Y + 70)
         }
         ctx.textAlign = 'left'
@@ -1074,7 +1082,7 @@
           ctx.font      = i === 0
             ? "14px 'Courier New', Courier, monospace"
             : "12px 'Courier New', Courier, monospace"
-          ctx.fillStyle = i === 0 ? '#c8c8e4' : '#8888a8'
+          ctx.fillStyle = i === 0 ? G_BRIGHT : G_DIM
           ctx.fillText(line, MEDIA_X, HUD_H - 38 + i * 18, maxW)
         })
       }
@@ -1085,7 +1093,6 @@
     function start() { if (!animFrame) draw() }
     function stop()  { if (animFrame)  { cancelAnimationFrame(animFrame); animFrame = null } }
 
-    // Start/stop with tab visibility
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
         if (tab.dataset.tab === 'preview') start()
@@ -1093,7 +1100,7 @@
       })
     })
 
-    // Camera toggle
+    // Camera toggle — tries three constraint sets to maximise compatibility
     camBtn.addEventListener('click', async () => {
       if (camStream) {
         camStream.getTracks().forEach(t => t.stop())
@@ -1103,19 +1110,36 @@
         camBtn.classList.remove('active')
         return
       }
-      try {
-        camStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1920 } }
-        })
-        camVid.srcObject = camStream
-        await camVid.play()
-        camBtn.textContent = 'Disable Camera'
-        camBtn.classList.add('active')
-      } catch {
-        const prev = camBtn.textContent
-        camBtn.textContent = 'Camera unavailable'
-        setTimeout(() => { camBtn.textContent = prev }, 2000)
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        camBtn.textContent = 'Camera not supported'
+        setTimeout(() => { camBtn.textContent = 'Enable Camera' }, 3000)
+        return
       }
+
+      // Try rear camera with ideal resolution, then any rear camera, then any camera
+      const attempts = [
+        { video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 } } },
+        { video: { facingMode: 'environment' } },
+        { video: true },
+      ]
+      let stream = null
+      for (const constraints of attempts) {
+        try { stream = await navigator.mediaDevices.getUserMedia(constraints); break }
+        catch { /* try next */ }
+      }
+
+      if (!stream) {
+        camBtn.textContent = 'Camera unavailable'
+        setTimeout(() => { camBtn.textContent = 'Enable Camera' }, 3000)
+        return
+      }
+
+      camStream = stream
+      camVid.srcObject = stream
+      await camVid.play()
+      camBtn.textContent = 'Disable Camera'
+      camBtn.classList.add('active')
     })
   })()
 </script>
