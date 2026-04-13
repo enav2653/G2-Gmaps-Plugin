@@ -32,7 +32,7 @@ import { formatInstruction, formatDistance, formatETA } from './display'
 export const CANVAS_W = 576
 export const CANVAS_H = 288
 
-const BANNER_H  = 64
+const BANNER_H  = 80
 const BOTTOM_Y  = 196
 const BOTTOM_H  = CANVAS_H - BOTTOM_Y   // 92
 
@@ -218,9 +218,9 @@ export function buildMediaContainer(content: string): TextContainerProperty | nu
     containerID:   CID.MEDIA,
     containerName: 'media',
     xPosition:     MEDIA_X,
-    yPosition:     CANVAS_H - 56,
+    yPosition:     CANVAS_H - 72,
     width:         MEDIA_W,
-    height:        56,
+    height:        72,
     borderWidth:   0,
     borderColor:   0,
     paddingLength: 4,

@@ -984,6 +984,15 @@ export async function menuEndNavigation() {
   await buildPage()
 }
 
+/** Go to passive mode without clearing the route. */
+export async function menuGoPassive() {
+  if (navState === 'passive') return
+  navState = 'passive'
+  stopGPS()
+  stopAndroidPoll()
+  await buildPage()
+}
+
 // ─── Settings hot-reload (called when user saves settings on phone) ───────────
 
 /** Returns raw device compass heading (degrees, 0 = north, CW) or null if unavailable. */
@@ -1169,7 +1178,7 @@ async function init() {
   window.addEventListener('g2maps:settings',  () => reloadSettings())
   window.addEventListener('g2maps:pause',     () => menuPauseResume())
   window.addEventListener('g2maps:passive',   () => menuPassiveMode())
-  window.addEventListener('g2maps:end',       () => menuEndNavigation())
+  window.addEventListener('g2maps:end',       () => menuGoPassive())
 }
 
 init()
