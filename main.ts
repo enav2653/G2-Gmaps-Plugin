@@ -661,7 +661,7 @@ async function buildPage() {
     const liveDistM = navState === 'navigating' && steps[esi]
       ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
       : undefined
-    const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
+    const bannerContent = buildBannerText(steps, esi, navState, liveDistM)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
     const textContainers: TextContainerProperty[] = [buildEventContainer()]
@@ -716,7 +716,7 @@ async function refreshBanner() {
   const liveDistM = navState === 'navigating' && steps[esi]
     ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
     : undefined
-  const content = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
+  const content = buildBannerText(steps, esi, navState, liveDistM)
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.BANNER,
     containerName: 'banner',
@@ -984,6 +984,15 @@ export async function menuEndNavigation() {
   await buildPage()
 }
 
+/** Go to passive mode without clearing the route. */
+export async function menuGoPassive() {
+  if (navState === 'passive') return
+  navState = 'passive'
+  stopGPS()
+  stopAndroidPoll()
+  await buildPage()
+}
+
 // ─── Settings hot-reload (called when user saves settings on phone) ───────────
 
 /** Returns raw device compass heading (degrees, 0 = north, CW) or null if unavailable. */
@@ -1014,7 +1023,7 @@ export function getHudState() {
     ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
     : undefined
   return {
-    bannerText:     buildBannerText(steps, esi, navState, bannerMode, liveDistM),
+    bannerText:     buildBannerText(steps, esi, navState, liveDistM),
     bannerVisible:  bannerMode !== 'always-off',
     speedText:      buildSpeedText(speedMph, limitMph, settings),
     speedVisible:   settings.speed.visible,
@@ -1169,7 +1178,7 @@ async function init() {
   window.addEventListener('g2maps:settings',  () => reloadSettings())
   window.addEventListener('g2maps:pause',     () => menuPauseResume())
   window.addEventListener('g2maps:passive',   () => menuPassiveMode())
-  window.addEventListener('g2maps:end',       () => menuEndNavigation())
+  window.addEventListener('g2maps:end',       () => menuGoPassive())
 }
 
 init()
