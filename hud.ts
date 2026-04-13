@@ -97,10 +97,11 @@ export function buildBannerText(
   if (state === 'paused')      return 'Navigation paused\nTap to resume'
   if (state === 'calibrating') return 'Compass Calibration\nWave phone in figure-8 pattern'
 
-  const step = steps[stepIdx]
+  const step      = steps[stepIdx]
   if (!step) return 'Finding location…\n'
 
-  const instr = formatInstruction(step.instruction)
+  const instrStep = steps[stepIdx + 1] ?? step  // next maneuver; fallback on last step
+  const instr = formatInstruction(instrStep.instruction)
   const dist  = formatDistance(liveDistM ?? step.distanceMeters)
   const eta   = formatETA(steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0))
 
