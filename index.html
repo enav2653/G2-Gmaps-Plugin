@@ -1111,9 +1111,19 @@
         return
       }
 
-      if (!navigator.mediaDevices?.getUserMedia) {
-        camBtn.textContent = 'Camera not supported'
-        setTimeout(() => { camBtn.textContent = 'Enable Camera' }, 3000)
+      // Log environment so we can see what's blocking the camera
+      const secureCtx = window.isSecureContext
+      const hasMD     = !!navigator.mediaDevices
+      const hasGUM    = !!navigator.mediaDevices?.getUserMedia
+      window.dispatchEvent(new CustomEvent('g2maps:status', {
+        detail: `camera: secureCtx=${secureCtx} mediaDevices=${hasMD} getUserMedia=${hasGUM} href=${location.href.slice(0,40)}`
+      }))
+
+      if (!hasGUM) {
+        const reason = !secureCtx ? 'needs HTTPS/localhost' : 'API not available in this WebView'
+        camBtn.textContent = reason
+        window.dispatchEvent(new CustomEvent('g2maps:status', { detail: `camera blocked: ${reason}` }))
+        setTimeout(() => { camBtn.textContent = 'Enable Camera' }, 4000)
         return
       }
 
@@ -1124,12 +1134,15 @@
         { video: true },
       ]
       let stream = null
+      let lastErr = null
       for (const constraints of attempts) {
         try { stream = await navigator.mediaDevices.getUserMedia(constraints); break }
-        catch { /* try next */ }
+        catch (e) { lastErr = e }
       }
 
       if (!stream) {
+        const errMsg = lastErr ? `${lastErr.name}: ${lastErr.message}` : 'unknown'
+        window.dispatchEvent(new CustomEvent('g2maps:status', { detail: `camera failed: ${errMsg}` }))
         camBtn.textContent = 'Camera unavailable'
         setTimeout(() => { camBtn.textContent = 'Enable Camera' }, 3000)
         return
