@@ -161,6 +161,18 @@
     .p-speed-unit  { color: #8888a0; }
     .p-speed-limit { border: 0.5px solid rgba(255,255,255,0.25); border-radius: 2px; color: #8888a0; }
 
+    /* ── Compass calibration overlay ── */
+    .cal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.88);
+                   display:none; align-items:center; justify-content:center; z-index:200; }
+    .cal-overlay.open { display:flex; }
+    .cal-card { background:var(--surface); border:0.5px solid var(--border); border-radius:16px;
+                padding:24px 20px; width:calc(100% - 40px); max-width:320px;
+                display:flex; flex-direction:column; align-items:center; gap:14px; }
+    .cal-title { font-size:16px; font-weight:600; color:var(--text); }
+    .cal-hint  { font-size:12px; color:var(--muted); text-align:center; line-height:1.6; }
+    .cal-hdg   { font-size:22px; font-weight:500; color:var(--text); font-variant-numeric:tabular-nums;
+                 min-width:80px; text-align:center; }
+
     /* ── Action buttons ── */
     .action-row { display: flex; gap: 10px; padding: 14px 16px 0; }
     .action-btn { flex: 1; padding: 11px; background: transparent;
@@ -369,6 +381,15 @@
     </div>
   </div>
 
+  <div class="settings-section">Compass</div>
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Calibrate North</div>
+      <div class="toggle-sub">Correct heading offset with your phone</div>
+    </div>
+    <button class="action-btn" id="cal-open-btn" style="flex-shrink:0;padding:8px 14px;font-size:12px;">Calibrate</button>
+  </div>
+
   <div class="action-row">
     <button class="action-btn" id="reset-btn">Reset defaults</button>
     <button class="action-btn primary" id="save-btn">Save to glasses</button>
@@ -377,9 +398,59 @@
   <div class="bottom-pad"></div>
 </div>
 
+<!-- ══════════════════════════════════════════
+     Compass calibration overlay
+     ══════════════════════════════════════════ -->
+<div class="cal-overlay" id="cal-overlay">
+  <div class="cal-card">
+    <div class="cal-title">Calibrate Compass</div>
+
+    <!-- Live compass rose — needle rotates to show phone heading -->
+    <svg id="cal-compass" viewBox="0 0 120 120" width="150" height="150">
+      <!-- Outer ring -->
+      <circle cx="60" cy="60" r="56" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1.5"/>
+      <!-- 16 tick marks -->
+      <g stroke="rgba(255,255,255,0.15)" stroke-width="1">
+        <line x1="60" y1="4"  x2="60" y2="12"/>  <line x1="60" y1="108" x2="60" y2="116"/>
+        <line x1="4"  y1="60" x2="12" y2="60"/>  <line x1="108" y1="60" x2="116" y2="60"/>
+        <line x1="20" y1="20" x2="26" y2="26"/>  <line x1="94" y1="20" x2="100" y2="26"/>
+        <line x1="20" y1="100" x2="26" y2="94"/> <line x1="94" y1="100" x2="100" y2="94"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(22.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(45,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(67.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(112.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(135,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(157.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(202.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(247.5,60,60)"/>
+      </g>
+      <!-- Cardinal labels — fixed -->
+      <text x="60" y="18"  text-anchor="middle" fill="#378ADD" font-size="13" font-weight="700" font-family="sans-serif">N</text>
+      <text x="60" y="112" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="11" font-family="sans-serif">S</text>
+      <text x="112" y="65" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="11" font-family="sans-serif">E</text>
+      <text x="8"   y="65" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="11" font-family="sans-serif">W</text>
+      <!-- Needle (rotates with phone heading — red tip shows where phone top is pointing) -->
+      <g id="cal-needle" transform="rotate(0,60,60)">
+        <path d="M60,16 L56,60 L60,52 L64,60 Z" fill="#f08080"/>
+        <path d="M60,104 L56,60 L60,68 L64,60 Z" fill="rgba(255,255,255,0.18)"/>
+      </g>
+      <circle cx="60" cy="60" r="5" fill="var(--surface)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
+    </svg>
+
+    <div class="cal-hint">
+      Lay phone flat and rotate until the<br>
+      red needle points to <strong style="color:#378ADD">N</strong>, then tap <strong>Set North</strong>
+    </div>
+    <div class="cal-hdg" id="cal-hdg-val">---</div>
+
+    <button class="action-btn primary" id="cal-set-btn" style="width:100%;padding:14px;font-size:15px;">Set North</button>
+    <button class="action-btn" id="cal-cancel-btn" style="width:100%;">Cancel</button>
+  </div>
+</div>
+
 <script type="module">
   import { geocode }           from './maps.ts'
-  import { startNavigation, menuPauseResume, menuPassiveMode, menuEndNavigation, reloadSettings } from './main.ts'
+  import { startNavigation, menuPauseResume, menuPassiveMode, menuEndNavigation, reloadSettings, getDeviceHeading, calibrateCompassManual } from './main.ts'
   import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './settings.ts'
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
@@ -797,6 +868,42 @@
   })
 
   loadUIFromSettings()
+
+  // ── Compass calibration ───────────────────────────────────────────────────
+  let calInterval = null
+  const calOverlay = document.getElementById('cal-overlay')
+  const calNeedle  = document.getElementById('cal-needle')
+  const calHdgVal  = document.getElementById('cal-hdg-val')
+
+  function openCompassCal() {
+    calOverlay.classList.add('open')
+    calInterval = setInterval(() => {
+      const hdg = getDeviceHeading()
+      if (hdg !== null) {
+        calHdgVal.textContent = Math.round(hdg) + '°'
+        calNeedle.setAttribute('transform', `rotate(${hdg},60,60)`)
+      } else {
+        calHdgVal.textContent = 'No sensor'
+      }
+    }, 100)
+  }
+
+  function closeCompassCal() {
+    calOverlay.classList.remove('open')
+    clearInterval(calInterval)
+    calInterval = null
+  }
+
+  document.getElementById('cal-open-btn').addEventListener('click', openCompassCal)
+  document.getElementById('cal-cancel-btn').addEventListener('click', closeCompassCal)
+  document.getElementById('cal-set-btn').addEventListener('click', async () => {
+    await calibrateCompassManual()
+    closeCompassCal()
+    const el = document.getElementById('settings-status')
+    el.textContent = 'Compass calibrated'
+    el.className = 'status active'
+    setTimeout(() => { el.textContent = ''; el.className = 'status' }, 2500)
+  })
 </script>
 </body>
 </html>

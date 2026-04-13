@@ -984,6 +984,27 @@ export async function menuEndNavigation() {
 
 // ─── Settings hot-reload (called when user saves settings on phone) ───────────
 
+/** Returns raw device compass heading (degrees, 0 = north, CW) or null if unavailable. */
+export function getDeviceHeading(): number | null {
+  return deviceHeadingDeg
+}
+
+/** Manual north calibration: call when phone is physically pointing north.
+ *  Sets compassBias so corrected = 0 at the current sensor reading. */
+export async function calibrateCompassManual(): Promise<void> {
+  if (deviceHeadingDeg === null) {
+    reportStatus('compass: no sensor data — move phone first')
+    return
+  }
+  let bias = -deviceHeadingDeg
+  if (bias < -180) bias += 360
+  if (bias >  180) bias -= 360
+  compassBias    = bias
+  compassBiasCnf = 1
+  reportStatus(`compass: manual cal — bias ${compassBias.toFixed(1)}°`)
+  refreshMinimap().catch(() => {})
+}
+
 export async function reloadSettings() {
   settings = loadSettings()
   await buildPage()
