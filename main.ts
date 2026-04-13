@@ -636,7 +636,7 @@ async function reroute() {
 // encodes as PNG, uploads via updateImageRawData.  No API calls.
 
 let minimapRefreshing = false
-let lastMinimapBytes: Uint8Array | null = null
+let lastMinimapBytes: number[] | null = null
 
 function minimapZoom(): number {
   const d = distToManeuverM()
@@ -1021,7 +1021,7 @@ export function getHudState() {
     mediaText:      mediaPlaying ? buildMediaText(mediaTitle, mediaArtist) : '',
     mediaPlaying,
     minimapVisible: settings.minimap.visible,
-    minimapBytes:   lastMinimapBytes,
+    minimapBytes:   lastMinimapBytes as number[] | null,
   }
 }
 

@@ -985,7 +985,7 @@
       mapBytesRef = bytes
       if (mapBlobUrl) { URL.revokeObjectURL(mapBlobUrl); mapBlobUrl = null }
       if (!bytes) { mapImg.src = ''; return }
-      mapBlobUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/bmp' }))
+      mapBlobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/bmp' }))
       const tmp = new Image()
       tmp.onload = () => { mapImg = tmp }
       tmp.src = mapBlobUrl
