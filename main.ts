@@ -595,14 +595,18 @@ function effectiveStepIdx(): number {
 }
 
 /** Advance past any step whose endpoint we've entered.
- *  Threshold scales with speed to keep roughly 15 s of lookahead:
- *    20 mph → ~134 m   40 mph → ~268 m   60 mph → ~402 m
- *  Minimum 120 m so the step still advances promptly when nearly stopped. */
+ *  Threshold scales with speed but is also capped at 40% of the step's own
+ *  distance, so short interchange/ramp steps don't trigger prematurely when
+ *  the speed-based radius exceeds the step length itself.
+ *    20 mph → ~134 m   40 mph → ~268 m   60 mph → ~402 m  (before step cap) */
 function advanceStep(lat: number, lng: number): number {
-  const threshold = Math.max(120, speedMph * 6.7)  // 6.7 ≈ 15 s × 0.447 (mph→m/s)
   for (let i = stepIdx; i < steps.length - 1; i++) {
     const s = steps[i]
     if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
+    const threshold = Math.min(
+      Math.max(30, speedMph * 6.7),        // speed-scaled lookahead, floor 30 m
+      Math.max(30, s.distanceMeters * 0.4) // cap at 40% of this step's length
+    )
     if (haversine(lat, lng, s.endLat, s.endLng) < threshold) return i + 1
   }
   return stepIdx
