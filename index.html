@@ -972,14 +972,21 @@
     let mapBytesRef  = null
     let mapBlobUrl   = null
 
-    // Physical orientation via DeviceOrientationEvent.gamma — works even when
-    // the WebView is portrait-locked (screen.orientation always reports portrait).
-    // gamma = left/right tilt: |gamma| > 50° means phone is held in landscape.
+    // Physical orientation via DeviceOrientationEvent — works even when the
+    // WebView is portrait-locked (screen.orientation always reports portrait).
+    //
+    // Hysteresis prevents flickering at the boundary:
+    //   Enter landscape : |gamma| > ENTER (65°) while phone is upright
+    //   Exit  landscape : |gamma| < EXIT  (20°) while phone is upright
+    //   Ignore flat     : |beta|  < FLAT  (30°) — lying on a table keeps current state
     let lastGamma    = 0
+    let inLandscape  = false
+    const L_ENTER = 65   // °  clearly tilted sideways → switch to landscape
+    const L_EXIT  = 20   // °  nearly upright again    → switch back to portrait
+    const L_FLAT  = 30   // °  |beta| below this = phone is too flat to bother
 
     function applyCanvasTransform() {
-      const landscape = Math.abs(lastGamma) > 50
-      if (landscape) {
+      if (inLandscape) {
         // Compute the largest 2:1 canvas that fits the portrait viewport when rotated 90°.
         // After rotation: visual width = CSS height, visual height = CSS width.
         // Constraints: visual width  ≤ window.innerWidth
@@ -990,15 +997,15 @@
         const cssW    = cssH * 2                          // = visual height after rotation
         const dir     = lastGamma > 0 ? -90 : 90          // match physical tilt direction
         Object.assign(canvas.style, {
-          position:       'absolute',
-          top:            '50%',
-          left:           '50%',
-          width:          cssW + 'px',
-          height:         cssH + 'px',
-          maxWidth:       'none',
-          maxHeight:      'none',
-          transform:      `translateX(-50%) translateY(-50%) rotate(${dir}deg)`,
-          aspectRatio:    'auto',
+          position:    'absolute',
+          top:         '50%',
+          left:        '50%',
+          width:       cssW + 'px',
+          height:      cssH + 'px',
+          maxWidth:    'none',
+          maxHeight:   'none',
+          transform:   `translateX(-50%) translateY(-50%) rotate(${dir}deg)`,
+          aspectRatio: 'auto',
         })
       } else {
         // Portrait — let CSS take over again
@@ -1007,12 +1014,19 @@
     }
 
     window.addEventListener('deviceorientation', e => {
-      if (e.gamma === null) return
-      const wasLandscape = Math.abs(lastGamma) > 50
+      if (e.gamma === null || e.beta === null) return
+
+      // Phone too flat to determine intent — preserve current state
+      if (Math.abs(e.beta) < L_FLAT) return
+
+      const prev = inLandscape
+      if (!inLandscape && Math.abs(e.gamma) > L_ENTER) inLandscape = true
+      else if (inLandscape && Math.abs(e.gamma) < L_EXIT) inLandscape = false
+
+      // Keep lastGamma current so rotation direction stays correct
       lastGamma = e.gamma
-      const isLandscape  = Math.abs(e.gamma) > 50
-      // Only re-layout when crossing the threshold (avoids constant style churn)
-      if (isLandscape !== wasLandscape) applyCanvasTransform()
+
+      if (inLandscape !== prev) applyCanvasTransform()
     }, true)
 
     // Keep the minimap image in sync with the byte array from main.ts
