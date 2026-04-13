@@ -161,6 +161,34 @@
     .p-speed-unit  { color: #8888a0; }
     .p-speed-limit { border: 0.5px solid rgba(255,255,255,0.25); border-radius: 2px; color: #8888a0; }
 
+    /* ── Compass calibration overlay ── */
+    .cal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.88);
+                   display:none; align-items:center; justify-content:center; z-index:200; }
+    .cal-overlay.open { display:flex; }
+    .cal-card { background:var(--surface); border:0.5px solid var(--border); border-radius:16px;
+                padding:24px 20px; width:calc(100% - 40px); max-width:320px;
+                display:flex; flex-direction:column; align-items:center; gap:14px; }
+    .cal-title { font-size:16px; font-weight:600; color:var(--text); }
+    .cal-hint  { font-size:12px; color:var(--muted); text-align:center; line-height:1.6; }
+    .cal-hdg   { font-size:22px; font-weight:500; color:var(--text); font-variant-numeric:tabular-nums;
+                 min-width:80px; text-align:center; }
+
+    /* ── Preview (HUD simulator) tab ── */
+    .hud-sim-wrap    { flex: 1; display: flex; flex-direction: column; background: #000; overflow: hidden; }
+    /* position:relative + overflow:hidden so JS-rotated canvas stays clipped inside */
+    .hud-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
+                       padding: 12px; background: #000; min-height: 0;
+                       position: relative; overflow: hidden; }
+    /* Portrait default — width-constrained */
+    #hud-canvas      { display: block; aspect-ratio: 576/288;
+                       width: 100%; max-width: 576px;
+                       image-rendering: pixelated; border-radius: 5px;
+                       border: 0.5px solid rgba(255,255,255,0.12); }
+    .hud-note        { flex-shrink: 0; padding: 8px 16px 12px;
+                       font-size: 11px; color: var(--muted); text-align: center; background: #000; }
+    .hud-rotate-hint { display: none; }
+    @media (orientation: portrait) { .hud-rotate-hint { display: block; } }
+
     /* ── Action buttons ── */
     .action-row { display: flex; gap: 10px; padding: 14px 16px 0; }
     .action-btn { flex: 1; padding: 11px; background: transparent;
@@ -184,6 +212,7 @@
   <div class="tab active" data-tab="nav">Navigate</div>
   <div class="tab" data-tab="menu">Controls</div>
   <div class="tab" data-tab="settings">HUD settings</div>
+  <div class="tab" data-tab="preview">Preview</div>
 </div>
 
 <!-- ══════════════════════════════════════════
@@ -369,6 +398,15 @@
     </div>
   </div>
 
+  <div class="settings-section">Compass</div>
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Calibrate North</div>
+      <div class="toggle-sub">Correct heading offset with your phone</div>
+    </div>
+    <button class="action-btn" id="cal-open-btn" style="flex-shrink:0;padding:8px 14px;font-size:12px;">Calibrate</button>
+  </div>
+
   <div class="action-row">
     <button class="action-btn" id="reset-btn">Reset defaults</button>
     <button class="action-btn primary" id="save-btn">Save to glasses</button>
@@ -377,9 +415,74 @@
   <div class="bottom-pad"></div>
 </div>
 
+<!-- ══════════════════════════════════════════
+     TAB 4 — Preview (HUD simulator)
+     ══════════════════════════════════════════ -->
+<div class="panel" id="panel-preview">
+  <div class="hud-sim-wrap">
+    <div class="hud-canvas-wrap">
+      <canvas id="hud-canvas" width="576" height="288"></canvas>
+    </div>
+    <div class="hud-note">
+      <span class="hud-rotate-hint">Rotate to landscape for a larger view &nbsp;•&nbsp; </span>
+      G2 Glasses Simulator  •  576 × 288  •  live HUD state
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     Compass calibration overlay
+     ══════════════════════════════════════════ -->
+<div class="cal-overlay" id="cal-overlay">
+  <div class="cal-card">
+    <div class="cal-title">Calibrate Compass</div>
+
+    <!-- Live compass rose — needle rotates to show phone heading -->
+    <svg id="cal-compass" viewBox="0 0 120 120" width="150" height="150">
+      <!-- Outer ring -->
+      <circle cx="60" cy="60" r="56" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1.5"/>
+      <!-- 16 tick marks -->
+      <g stroke="rgba(255,255,255,0.15)" stroke-width="1">
+        <line x1="60" y1="4"  x2="60" y2="12"/>  <line x1="60" y1="108" x2="60" y2="116"/>
+        <line x1="4"  y1="60" x2="12" y2="60"/>  <line x1="108" y1="60" x2="116" y2="60"/>
+        <line x1="20" y1="20" x2="26" y2="26"/>  <line x1="94" y1="20" x2="100" y2="26"/>
+        <line x1="20" y1="100" x2="26" y2="94"/> <line x1="94" y1="100" x2="100" y2="94"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(22.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(45,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(67.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(112.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(135,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(157.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(202.5,60,60)"/>
+        <line x1="60" y1="4"  x2="60" y2="9"  transform="rotate(247.5,60,60)"/>
+      </g>
+      <!-- Cardinal labels — fixed -->
+      <text x="60" y="18"  text-anchor="middle" fill="#378ADD" font-size="13" font-weight="700" font-family="sans-serif">N</text>
+      <text x="60" y="112" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="11" font-family="sans-serif">S</text>
+      <text x="112" y="65" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="11" font-family="sans-serif">E</text>
+      <text x="8"   y="65" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="11" font-family="sans-serif">W</text>
+      <!-- Needle (rotates with phone heading — red tip shows where phone top is pointing) -->
+      <g id="cal-needle" transform="rotate(0,60,60)">
+        <path d="M60,16 L56,60 L60,52 L64,60 Z" fill="#f08080"/>
+        <path d="M60,104 L56,60 L60,68 L64,60 Z" fill="rgba(255,255,255,0.18)"/>
+      </g>
+      <circle cx="60" cy="60" r="5" fill="var(--surface)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
+    </svg>
+
+    <div class="cal-hint">
+      Lay phone flat and rotate until the<br>
+      red needle points to <strong style="color:#378ADD">N</strong>, then tap <strong>Set North</strong>
+    </div>
+    <div class="cal-hdg" id="cal-hdg-val">---</div>
+
+    <button class="action-btn primary" id="cal-set-btn" style="width:100%;padding:14px;font-size:15px;">Set North</button>
+    <button class="action-btn" id="cal-cancel-btn" style="width:100%;">Cancel</button>
+  </div>
+</div>
+
 <script type="module">
   import { geocode }           from './maps.ts'
-  import { startNavigation, menuPauseResume, menuPassiveMode, menuEndNavigation, reloadSettings } from './main.ts'
+  import { startNavigation, menuPauseResume, menuPassiveMode, menuEndNavigation, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState } from './main.ts'
   import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './settings.ts'
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
@@ -797,6 +900,257 @@
   })
 
   loadUIFromSettings()
+
+  // ── Compass calibration ───────────────────────────────────────────────────
+  let calInterval = null
+  const calOverlay = document.getElementById('cal-overlay')
+  const calNeedle  = document.getElementById('cal-needle')
+  const calHdgVal  = document.getElementById('cal-hdg-val')
+
+  function openCompassCal() {
+    calOverlay.classList.add('open')
+    calInterval = setInterval(() => {
+      const hdg = getDeviceHeading()
+      if (hdg !== null) {
+        calHdgVal.textContent = Math.round(hdg) + '°'
+        calNeedle.setAttribute('transform', `rotate(${hdg},60,60)`)
+      } else {
+        calHdgVal.textContent = 'No sensor'
+      }
+    }, 100)
+  }
+
+  function closeCompassCal() {
+    calOverlay.classList.remove('open')
+    clearInterval(calInterval)
+    calInterval = null
+  }
+
+  document.getElementById('cal-open-btn').addEventListener('click', openCompassCal)
+  document.getElementById('cal-cancel-btn').addEventListener('click', closeCompassCal)
+  document.getElementById('cal-set-btn').addEventListener('click', async () => {
+    await calibrateCompassManual()
+    closeCompassCal()
+    const el = document.getElementById('settings-status')
+    el.textContent = 'Compass calibrated'
+    el.className = 'status active'
+    setTimeout(() => { el.textContent = ''; el.className = 'status' }, 2500)
+  })
+
+  // ── Preview (HUD simulator) tab ──────────────────────────────────────────────
+  //
+  // Draws a pixel-accurate representation of the G2 display (576×288) on a
+  // <canvas> in phosphor-green — the native color of the waveguide display.
+  // Optionally uses the rear camera as a see-through background.
+  //
+  // Layout mirrors hud.ts exactly:
+  //   Banner  y=0   h=64          (top strip — instruction + distance + ETA)
+  //   Clear   y=64  h=132         (intentionally empty)
+  //   Minimap x=0   y=164 124×124 (bottom-left, overlaps bottom zone)
+  //   Speed   x=512 y=196 56×92   (bottom-right)
+  //   Media   x=130 y=232 376×56  (bottom-centre, between minimap and speed)
+
+  ;(function () {
+    const HUD_W = 576, HUD_H = 288
+    const BANNER_H  = 64
+    const BOTTOM_Y  = 196
+    const MINIMAP_Y = 164, MINIMAP_W = 124, MINIMAP_H = 124
+    const SPEED_X   = 512, SPEED_W = 56
+    const MEDIA_X   = 130
+
+    // Phosphor-green palette matching the G2 waveguide display
+    const G_BRIGHT = '#00e87a'   // main text
+    const G_DIM    = '#009950'   // secondary / labels
+    const G_FAINT  = '#005c2e'   // borders, dimmed elements
+
+    const canvas    = document.getElementById('hud-canvas')
+    const canvasWrap = canvas.parentElement
+    const ctx       = canvas.getContext('2d')
+
+    let animFrame    = null
+    let mapImg       = new Image()
+    let mapBytesRef  = null
+    let mapBlobUrl   = null
+
+    // Physical orientation via DeviceOrientationEvent — works even when the
+    // WebView is portrait-locked (screen.orientation always reports portrait).
+    //
+    // Asymmetric hysteresis + debounce:
+    //   Enter landscape : |gamma| > 70° sustained for 100 ms (gamma only — no beta
+    //                     check, avoids ZXY gimbal-lock instability near γ=±90°)
+    //   Exit  landscape : |gamma| < 20° sustained for 100 ms AND |beta| > 30°
+    //                     (flat phone keeps landscape state)
+    let lastGamma   = 0
+    let inLandscape = false
+    let stateTimer  = null
+    const L_ENTER = 70   // ° — clearly in landscape before committing
+    const L_EXIT  = 20   // ° — 50° hysteresis band
+    const L_FLAT  = 30   // ° — |beta| below this = flat; only blocks EXIT
+    const L_DELAY = 100  // ms — phone must hold the new angle this long
+
+    function applyCanvasTransform() {
+      if (inLandscape) {
+        // Compute the largest 2:1 canvas that fits the portrait viewport when rotated 90°.
+        // After rotation: visual width = CSS height, visual height = CSS width.
+        // Constraints: visual width  ≤ window.innerWidth
+        //              visual height ≤ canvasWrap.clientHeight (minus a little breathing room)
+        const maxVisW = window.innerWidth
+        const maxVisH = canvasWrap.clientHeight - 8
+        const cssH    = Math.min(maxVisW, maxVisH / 2)   // = visual width after rotation
+        const cssW    = cssH * 2                          // = visual height after rotation
+        const dir     = lastGamma > 0 ? -90 : 90          // match physical tilt direction
+        Object.assign(canvas.style, {
+          position:    'absolute',
+          top:         '50%',
+          left:        '50%',
+          width:       cssW + 'px',
+          height:      cssH + 'px',
+          maxWidth:    'none',
+          maxHeight:   'none',
+          transform:   `translateX(-50%) translateY(-50%) rotate(${dir}deg)`,
+          aspectRatio: 'auto',
+        })
+      } else {
+        // Portrait — let CSS take over again
+        canvas.removeAttribute('style')
+      }
+    }
+
+    window.addEventListener('deviceorientation', e => {
+      if (e.gamma === null || e.beta === null) return
+
+      // Always track gamma for rotation direction, even when no state change
+      lastGamma = e.gamma
+
+      // Determine desired next state
+      let desired = inLandscape
+      if (!inLandscape && Math.abs(e.gamma) > L_ENTER) {
+        desired = true
+      } else if (inLandscape && Math.abs(e.gamma) < L_EXIT) {
+        if (Math.abs(e.beta) < L_FLAT) return   // flat phone: keep landscape, skip timer reset
+        desired = false
+      }
+
+      if (desired === inLandscape) {
+        // Back in the stable zone — cancel any pending transition
+        if (stateTimer) { clearTimeout(stateTimer); stateTimer = null }
+        return
+      }
+
+      // Phone is past a threshold: commit after L_DELAY ms without reverting
+      if (!stateTimer) {
+        const target = desired
+        stateTimer = setTimeout(() => {
+          stateTimer  = null
+          inLandscape = target
+          applyCanvasTransform()
+        }, L_DELAY)
+      }
+    }, true)
+
+    // Keep the minimap image in sync with the byte array from main.ts
+    function syncMinimapImg(bytes) {
+      if (bytes === mapBytesRef) return
+      mapBytesRef = bytes
+      if (mapBlobUrl) { URL.revokeObjectURL(mapBlobUrl); mapBlobUrl = null }
+      if (!bytes) { mapImg.src = ''; return }
+      mapBlobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/bmp' }))
+      const tmp = new Image()
+      tmp.onload = () => { mapImg = tmp }
+      tmp.src = mapBlobUrl
+    }
+
+    function draw() {
+      const s = getHudState()
+      syncMinimapImg(s.minimapBytes)
+
+      // ── Background ──────────────────────────────────────────────────────────
+      ctx.fillStyle = '#020d06'
+      ctx.fillRect(0, 0, HUD_W, HUD_H)
+
+      // ── Banner ───────────────────────────────────────────────────────────────
+      if (s.bannerVisible && s.bannerText) {
+        ctx.fillStyle = 'rgba(0,18,8,0.35)'
+        ctx.fillRect(0, 0, HUD_W, BANNER_H)
+        ctx.textAlign = 'left'
+        const lines = s.bannerText.split('\n')
+        lines.forEach((line, i) => {
+          ctx.font      = i === 0
+            ? "bold 17px 'Courier New', Courier, monospace"
+            : "13px 'Courier New', Courier, monospace"
+          ctx.fillStyle = i === 0 ? G_BRIGHT : G_DIM
+          ctx.fillText(line, 6, 22 + i * 21, HUD_W - 12)
+        })
+      }
+
+      // ── Minimap image (green-tinted via canvas filter) ────────────────────────
+      if (s.minimapVisible && mapImg.naturalWidth > 0) {
+        ctx.save()
+        // Convert greyscale BMP → phosphor green:
+        // sepia shifts grey to warm brown, hue-rotate + saturate push it to green
+        ctx.filter = 'sepia(1) hue-rotate(82deg) saturate(5) brightness(0.95)'
+        ctx.drawImage(mapImg, 0, MINIMAP_Y, MINIMAP_W, MINIMAP_H)
+        ctx.restore()
+      } else if (s.minimapVisible) {
+        ctx.strokeStyle = G_FAINT
+        ctx.lineWidth   = 0.5
+        ctx.strokeRect(0.5, MINIMAP_Y + 0.5, MINIMAP_W - 1, MINIMAP_H - 1)
+        ctx.fillStyle   = '#020d06'
+        ctx.fillRect(1, MINIMAP_Y + 1, MINIMAP_W - 2, MINIMAP_H - 2)
+      }
+
+      // ── Speed ────────────────────────────────────────────────────────────────
+      if (s.speedVisible && s.speedText) {
+        const parts = s.speedText.split('\n').filter(l => l !== '─────')
+        const cx    = SPEED_X + SPEED_W / 2
+        ctx.textAlign = 'center'
+        if (parts[0]) {
+          ctx.font      = "bold 26px 'Courier New', Courier, monospace"
+          ctx.fillStyle = G_BRIGHT
+          ctx.fillText(parts[0], cx, BOTTOM_Y + 32)
+        }
+        if (parts[1]) {
+          ctx.font      = "11px 'Courier New', Courier, monospace"
+          ctx.fillStyle = G_DIM
+          ctx.fillText(parts[1], cx, BOTTOM_Y + 48)
+        }
+        if (parts[2]) {
+          ctx.strokeStyle = G_FAINT
+          ctx.lineWidth   = 0.5
+          ctx.strokeRect(SPEED_X + 4, BOTTOM_Y + 55, SPEED_W - 8, 22)
+          ctx.font        = "14px 'Courier New', Courier, monospace"
+          ctx.fillStyle   = G_DIM
+          ctx.fillText(parts[2], cx, BOTTOM_Y + 70)
+        }
+        ctx.textAlign = 'left'
+      }
+
+      // ── Media (now playing) ──────────────────────────────────────────────────
+      if (s.mediaPlaying && s.mediaText) {
+        const mLines = s.mediaText.split('\n')
+        const maxW   = SPEED_X - MEDIA_X - 6
+        mLines.forEach((line, i) => {
+          ctx.font      = i === 0
+            ? "14px 'Courier New', Courier, monospace"
+            : "12px 'Courier New', Courier, monospace"
+          ctx.fillStyle = i === 0 ? G_BRIGHT : G_DIM
+          ctx.fillText(line, MEDIA_X, HUD_H - 38 + i * 18, maxW)
+        })
+      }
+
+      animFrame = requestAnimationFrame(draw)
+    }
+
+    function start() { if (!animFrame) { applyCanvasTransform(); draw() } }
+    function stop()  { if (animFrame)  { cancelAnimationFrame(animFrame); animFrame = null } }
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        if (tab.dataset.tab === 'preview') start()
+        else stop()
+      })
+    })
+  })()
 </script>
 </body>
 </html>

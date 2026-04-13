@@ -22,6 +22,8 @@ import {
   buildSpeedContainer,
   buildBannerText,
   buildSpeedText,
+  buildMediaText,
+  buildMediaContainer,
   BANNER_MODES, BannerMode,
   NavState,
   CID,
@@ -50,13 +52,27 @@ let buildingPage    = false  // serialises concurrent buildPage calls
 let buildPagePending = false  // a call arrived while buildingPage was true
 
 // Cached reference to whichever Android/bridge location method worked
-let activeLocationProvider: (() => Promise<{ lat: number; lng: number; speedMs?: number; headingDeg?: number } | null>) | null = null
+type LocationFix = {
+  lat: number
+  lng: number
+  speedMs?: number
+  headingDeg?: number
+  mediaTitle?: string
+  mediaArtist?: string
+  mediaPlaying?: boolean
+}
+let activeLocationProvider: (() => Promise<LocationFix | null>) | null = null
 let androidPollTimer: ReturnType<typeof setInterval> | null = null
 let bridgeScanned = false   // suppress repeated diagnostic logs during retry polls
 
 // Manual step preview (swipe) — null means track navigation step
 let previewStepIdx:   number | null = null
 let previewResetTimer: ReturnType<typeof setTimeout> | null = null
+
+// Media state — populated from Tasker GPS bridge response
+let mediaTitle   = ''
+let mediaArtist  = ''
+let mediaPlaying = false
 
 // Speed calculation from consecutive position fixes
 let prevPollLat  = 0
@@ -101,14 +117,22 @@ let rerouteInProgress = false
 // Once a working provider is found it is cached in activeLocationProvider
 // so subsequent polls don't re-scan.
 
-function parseLocation(r: any): { lat: number; lng: number; speedMs?: number; headingDeg?: number } | null {
+function parseLocation(r: any): LocationFix | null {
   if (r == null) return null
   if (typeof r === 'string') {
     try { r = JSON.parse(r) } catch { return null }
   }
-  const speedMs = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
-  if (r.lat != null && r.lng != null)            return { lat: +r.lat,      lng: +r.lng, speedMs }
-  if (r.latitude != null && r.longitude != null) return { lat: +r.latitude, lng: +r.longitude, speedMs }
+  const speedMs     = (r.speed != null && +r.speed >= 0) ? +r.speed : undefined
+  const headingDeg  = (r.heading != null && isFinite(+r.heading)) ? +r.heading : undefined
+  const mediaTitle  = typeof r.media_title  === 'string' ? r.media_title  : undefined
+  const mediaArtist = typeof r.media_artist === 'string' ? r.media_artist : undefined
+  const mediaPlaying = r.media_playing === true || r.media_playing === 'true' ? true
+    : r.media_playing === false || r.media_playing === 'false' ? false
+    : undefined
+  if (r.lat != null && r.lng != null)
+    return { lat: +r.lat, lng: +r.lng, speedMs, headingDeg, mediaTitle, mediaArtist, mediaPlaying }
+  if (r.latitude != null && r.longitude != null)
+    return { lat: +r.latitude, lng: +r.longitude, speedMs, headingDeg, mediaTitle, mediaArtist, mediaPlaying }
   return null
 }
 
@@ -120,7 +144,7 @@ async function fetchJsonTolerant(res: Response): Promise<any> {
   try { return JSON.parse(text.replace(/%[A-Z0-9_]+/g, 'null')) } catch { return null }
 }
 
-async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null> {
+async function tryBridgeLocation(): Promise<LocationFix | null> {
   // If we already found a working provider, use it directly
   if (activeLocationProvider) return activeLocationProvider()
 
@@ -289,9 +313,34 @@ async function pollLocation() {
   currentLat = loc.lat
   currentLng = loc.lng
 
+  // ─── Media state ──────────────────────────────────────────────────────────
+  const prevMediaPlaying = mediaPlaying
+  const prevMediaTitle   = mediaTitle
+  const prevMediaArtist  = mediaArtist
+  if (loc.mediaTitle   !== undefined) mediaTitle   = loc.mediaTitle
+  if (loc.mediaArtist  !== undefined) mediaArtist  = loc.mediaArtist
+  if (loc.mediaPlaying !== undefined) mediaPlaying = loc.mediaPlaying
+  const mediaStateChanged = prevMediaPlaying !== mediaPlaying
+  const trackChanged = mediaPlaying && !mediaStateChanged &&
+    (mediaTitle !== prevMediaTitle || mediaArtist !== prevMediaArtist)
+  if (mediaStateChanged) {
+    if (mediaPlaying) {
+      reportStatus(`media: playing — ${mediaTitle} / ${mediaArtist}`)
+    } else {
+      reportStatus('media: stopped')
+    }
+  } else if (trackChanged) {
+    reportStatus(`media: track — ${mediaTitle} / ${mediaArtist}`)
+  }
+
   if (navState !== 'navigating') {
-    await refreshSpeed()
-    await refreshMinimap()
+    if (mediaStateChanged) {
+      await buildPage()
+    } else {
+      await refreshSpeed()
+      await refreshMinimap()
+      if (mediaPlaying) await refreshMedia()
+    }
     updatePollRate()
     return
   }
@@ -325,10 +374,15 @@ async function pollLocation() {
   updatePollRate()
 
   if (!stepped) {
-    // In-place text update only — live updates without full rebuild
-    await refreshBanner()
-    await refreshSpeed()
-    await refreshMinimap()
+    if (mediaStateChanged) {
+      await buildPage()
+    } else {
+      // In-place text update only — live updates without full rebuild
+      await refreshBanner()
+      await refreshSpeed()
+      await refreshMinimap()
+      if (mediaPlaying) await refreshMedia()
+    }
     return
   }
 
@@ -582,6 +636,7 @@ async function reroute() {
 // encodes as PNG, uploads via updateImageRawData.  No API calls.
 
 let minimapRefreshing = false
+let lastMinimapBytes: number[] | null = null
 
 function minimapZoom(): number {
   const d = distToManeuverM()
@@ -613,6 +668,10 @@ async function buildPage() {
     if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent))
     const speedContainer = buildSpeedContainer(speedContent, settings)
     if (speedContainer) textContainers.push(speedContainer)
+    if (mediaPlaying) {
+      const mediaContainer = buildMediaContainer(buildMediaText(mediaTitle, mediaArtist))
+      if (mediaContainer) textContainers.push(mediaContainer)
+    }
 
     const imageContainers: ImageContainerProperty[] = [
       ...buildMinimapImageContainers(settings),
@@ -679,6 +738,18 @@ async function refreshSpeed() {
   }))
 }
 
+async function refreshMedia() {
+  if (!mediaPlaying) return
+  const content = buildMediaText(mediaTitle, mediaArtist)
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.MEDIA,
+    containerName: 'media',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
+}
+
 async function refreshMinimap() {
   if (navState === 'calibrating') return
   if (!settings.minimap.visible || !pageCreated) return
@@ -696,6 +767,7 @@ async function refreshMinimap() {
       getCachedRoads(),
       activeHeadingDeg(),
     )
+    lastMinimapBytes = imageData
     const result = await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   MAP_TILE_CIDS[0],
       containerName: 'minimap',
@@ -914,6 +986,45 @@ export async function menuEndNavigation() {
 
 // ─── Settings hot-reload (called when user saves settings on phone) ───────────
 
+/** Returns raw device compass heading (degrees, 0 = north, CW) or null if unavailable. */
+export function getDeviceHeading(): number | null {
+  return deviceHeadingDeg
+}
+
+/** Manual north calibration: call when phone is physically pointing north.
+ *  Sets compassBias so corrected = 0 at the current sensor reading. */
+export async function calibrateCompassManual(): Promise<void> {
+  if (deviceHeadingDeg === null) {
+    reportStatus('compass: no sensor data — move phone first')
+    return
+  }
+  let bias = -deviceHeadingDeg
+  if (bias < -180) bias += 360
+  if (bias >  180) bias -= 360
+  compassBias    = bias
+  compassBiasCnf = 1
+  reportStatus(`compass: manual cal — bias ${compassBias.toFixed(1)}°`)
+  refreshMinimap().catch(() => {})
+}
+
+/** Live snapshot of all HUD display state — used by the phone Preview tab. */
+export function getHudState() {
+  const esi       = effectiveStepIdx()
+  const liveDistM = navState === 'navigating' && steps[esi]
+    ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
+    : undefined
+  return {
+    bannerText:     buildBannerText(steps, esi, navState, bannerMode, liveDistM),
+    bannerVisible:  bannerMode !== 'always-off',
+    speedText:      buildSpeedText(speedMph, limitMph, settings),
+    speedVisible:   settings.speed.visible,
+    mediaText:      mediaPlaying ? buildMediaText(mediaTitle, mediaArtist) : '',
+    mediaPlaying,
+    minimapVisible: settings.minimap.visible,
+    minimapBytes:   lastMinimapBytes as number[] | null,
+  }
+}
+
 export async function reloadSettings() {
   settings = loadSettings()
   await buildPage()
@@ -1025,6 +1136,7 @@ async function init() {
       refreshBanner()
       refreshSpeed()
       refreshMinimap()
+      if (mediaPlaying) refreshMedia()
     }
   })
 
@@ -1035,8 +1147,18 @@ async function init() {
   // so this won't interfere with a later navigation session.
   // Always start the poll loop; if Tasker isn't running yet, it retries every 2 s.
   tryBridgeLocation()
-    .then(loc => {
-      if (loc) { currentLat = loc.lat; currentLng = loc.lng }
+    .then(async loc => {
+      if (loc) {
+        currentLat = loc.lat
+        currentLng = loc.lng
+        if (loc.mediaTitle   !== undefined) mediaTitle   = loc.mediaTitle
+        if (loc.mediaArtist  !== undefined) mediaArtist  = loc.mediaArtist
+        if (loc.mediaPlaying !== undefined) mediaPlaying = loc.mediaPlaying
+        if (mediaPlaying) {
+          reportStatus(`media: playing — ${mediaTitle} / ${mediaArtist}`)
+          await buildPage()
+        }
+      }
       startAndroidPoll()
       if (!loc) startGPS()   // parallel fallback — harmless if Tasker picks up later
     })
