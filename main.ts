@@ -636,6 +636,7 @@ async function reroute() {
 // encodes as PNG, uploads via updateImageRawData.  No API calls.
 
 let minimapRefreshing = false
+let lastMinimapBytes: Uint8Array | null = null
 
 function minimapZoom(): number {
   const d = distToManeuverM()
@@ -766,6 +767,7 @@ async function refreshMinimap() {
       getCachedRoads(),
       activeHeadingDeg(),
     )
+    lastMinimapBytes = imageData
     const result = await bridge.updateImageRawData(new ImageRawDataUpdate({
       containerID:   MAP_TILE_CIDS[0],
       containerName: 'minimap',
@@ -1003,6 +1005,24 @@ export async function calibrateCompassManual(): Promise<void> {
   compassBiasCnf = 1
   reportStatus(`compass: manual cal — bias ${compassBias.toFixed(1)}°`)
   refreshMinimap().catch(() => {})
+}
+
+/** Live snapshot of all HUD display state — used by the phone Preview tab. */
+export function getHudState() {
+  const esi       = effectiveStepIdx()
+  const liveDistM = navState === 'navigating' && steps[esi]
+    ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
+    : undefined
+  return {
+    bannerText:     buildBannerText(steps, esi, navState, bannerMode, liveDistM),
+    bannerVisible:  bannerMode !== 'always-off',
+    speedText:      buildSpeedText(speedMph, limitMph, settings),
+    speedVisible:   settings.speed.visible,
+    mediaText:      mediaPlaying ? buildMediaText(mediaTitle, mediaArtist) : '',
+    mediaPlaying,
+    minimapVisible: settings.minimap.visible,
+    minimapBytes:   lastMinimapBytes,
+  }
 }
 
 export async function reloadSettings() {
