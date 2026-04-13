@@ -975,15 +975,18 @@
     // Physical orientation via DeviceOrientationEvent — works even when the
     // WebView is portrait-locked (screen.orientation always reports portrait).
     //
-    // Hysteresis prevents flickering at the boundary:
-    //   Enter landscape : |gamma| > ENTER (65°) while phone is upright
-    //   Exit  landscape : |gamma| < EXIT  (20°) while phone is upright
-    //   Ignore flat     : |beta|  < FLAT  (30°) — lying on a table keeps current state
-    let lastGamma    = 0
-    let inLandscape  = false
-    const L_ENTER = 60   // °  enter landscape — gamma alone (no beta: avoids gimbal lock at high γ)
-    const L_EXIT  = 20   // °  exit  landscape — 40° hysteresis band
-    const L_FLAT  = 30   // °  |beta| below this = too flat; only blocks EXIT (keeps landscape)
+    // Asymmetric hysteresis + debounce:
+    //   Enter landscape : |gamma| > 70° sustained for 100 ms (gamma only — no beta
+    //                     check, avoids ZXY gimbal-lock instability near γ=±90°)
+    //   Exit  landscape : |gamma| < 20° sustained for 100 ms AND |beta| > 30°
+    //                     (flat phone keeps landscape state)
+    let lastGamma   = 0
+    let inLandscape = false
+    let stateTimer  = null
+    const L_ENTER = 70   // ° — clearly in landscape before committing
+    const L_EXIT  = 20   // ° — 50° hysteresis band
+    const L_FLAT  = 30   // ° — |beta| below this = flat; only blocks EXIT
+    const L_DELAY = 100  // ms — phone must hold the new angle this long
 
     function applyCanvasTransform() {
       if (inLandscape) {
@@ -1016,23 +1019,33 @@
     window.addEventListener('deviceorientation', e => {
       if (e.gamma === null || e.beta === null) return
 
-      const prev = inLandscape
+      // Always track gamma for rotation direction, even when no state change
+      lastGamma = e.gamma
 
+      // Determine desired next state
+      let desired = inLandscape
       if (!inLandscape && Math.abs(e.gamma) > L_ENTER) {
-        // Enter landscape — gamma only; no beta check.
-        // Near γ=±90° the ZXY Euler angles hit gimbal lock so beta is unreliable.
-        inLandscape = true
-
+        desired = true
       } else if (inLandscape && Math.abs(e.gamma) < L_EXIT) {
-        // Exit landscape — only if phone is also upright.
-        // Flat phone (beta < L_FLAT) keeps the landscape state so setting it
-        // down on a table doesn't snap back to portrait.
-        if (Math.abs(e.beta) < L_FLAT) return
-        inLandscape = false
+        if (Math.abs(e.beta) < L_FLAT) return   // flat phone: keep landscape, skip timer reset
+        desired = false
       }
 
-      lastGamma = e.gamma
-      if (inLandscape !== prev) applyCanvasTransform()
+      if (desired === inLandscape) {
+        // Back in the stable zone — cancel any pending transition
+        if (stateTimer) { clearTimeout(stateTimer); stateTimer = null }
+        return
+      }
+
+      // Phone is past a threshold: commit after L_DELAY ms without reverting
+      if (!stateTimer) {
+        const target = desired
+        stateTimer = setTimeout(() => {
+          stateTimer  = null
+          inLandscape = target
+          applyCanvasTransform()
+        }, L_DELAY)
+      }
     }, true)
 
     // Keep the minimap image in sync with the byte array from main.ts
