@@ -1,4 +1,4 @@
-const MAX_INSTR = 28
+const MAX_INSTR = 35
 
 export function formatInstruction(text: string, maxLen = MAX_INSTR): string {
   const stripped = text
