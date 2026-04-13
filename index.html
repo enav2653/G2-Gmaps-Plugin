@@ -174,23 +174,14 @@
                  min-width:80px; text-align:center; }
 
     /* ── Preview (HUD simulator) tab ── */
-    .hud-sim-wrap  { flex: 1; display: flex; flex-direction: column; background: #000; overflow: hidden; }
-    .hud-cam-bar   { display: flex; align-items: center; justify-content: space-between;
-                     padding: 10px 16px; background: var(--surface);
-                     border-bottom: 0.5px solid var(--border); flex-shrink: 0; }
-    .hud-cam-label { font-size: 12px; color: var(--muted); }
-    .hud-cam-btn   { font-size: 12px; padding: 7px 14px; background: transparent;
-                     border: 0.5px solid var(--border); border-radius: 8px; color: var(--text);
-                     cursor: pointer; transition: border-color 0.15s, color 0.15s; }
-    .hud-cam-btn.active { border-color: var(--green); color: var(--green); }
+    .hud-sim-wrap    { flex: 1; display: flex; flex-direction: column; background: #000; overflow: hidden; }
     .hud-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
                        padding: 12px; background: #000; min-height: 0; }
-    #hud-canvas  { width: 100%; max-width: 576px; aspect-ratio: 576/288;
-                   image-rendering: pixelated; border-radius: 5px;
-                   border: 0.5px solid rgba(255,255,255,0.12);
-                   display: block; }
-    .hud-note    { flex-shrink: 0; padding: 8px 16px 12px;
-                   font-size: 11px; color: var(--muted); text-align: center; background: #000; }
+    #hud-canvas      { width: 100%; max-width: 576px; aspect-ratio: 576/288;
+                       image-rendering: pixelated; border-radius: 5px;
+                       border: 0.5px solid rgba(255,255,255,0.12); display: block; }
+    .hud-note        { flex-shrink: 0; padding: 8px 16px 12px;
+                       font-size: 11px; color: var(--muted); text-align: center; background: #000; }
     .hud-rotate-hint { display: none; }
     @media (orientation: portrait) { .hud-rotate-hint { display: block; } }
 
@@ -425,21 +416,15 @@
      ══════════════════════════════════════════ -->
 <div class="panel" id="panel-preview">
   <div class="hud-sim-wrap">
-    <div class="hud-cam-bar">
-      <span class="hud-cam-label">G2 Glasses Simulator  •  576 × 288</span>
-      <button class="hud-cam-btn" id="hud-cam-btn">Enable Camera</button>
-    </div>
     <div class="hud-canvas-wrap">
       <canvas id="hud-canvas" width="576" height="288"></canvas>
     </div>
     <div class="hud-note">
       <span class="hud-rotate-hint">Rotate to landscape for a larger view &nbsp;•&nbsp; </span>
-      Enable Camera to simulate the see-through glasses display
+      G2 Glasses Simulator  •  576 × 288  •  live HUD state
     </div>
   </div>
 </div>
-<!-- Hidden video element feeds camera frames into the HUD canvas -->
-<video id="hud-cam-video" style="display:none" muted playsinline autoplay></video>
 
 <!-- ══════════════════════════════════════════
      Compass calibration overlay
@@ -976,14 +961,11 @@
 
     const canvas = document.getElementById('hud-canvas')
     const ctx    = canvas.getContext('2d')
-    const camBtn = document.getElementById('hud-cam-btn')
-    const camVid = document.getElementById('hud-cam-video')
 
-    let camStream     = null
-    let animFrame     = null
-    let mapImg        = new Image()
-    let mapBytesRef   = null
-    let mapBlobUrl    = null
+    let animFrame   = null
+    let mapImg      = new Image()
+    let mapBytesRef = null
+    let mapBlobUrl  = null
 
     // Keep the minimap image in sync with the byte array from main.ts
     function syncMinimapImg(bytes) {
@@ -1002,20 +984,8 @@
       syncMinimapImg(s.minimapBytes)
 
       // ── Background ──────────────────────────────────────────────────────────
-      if (camStream && camVid.readyState >= 2) {
-        const vw = camVid.videoWidth || 1, vh = camVid.videoHeight || 1
-        const vAR = vw / vh, cAR = HUD_W / HUD_H
-        let sx = 0, sy = 0, sw = vw, sh = vh
-        if (vAR > cAR) { sw = Math.round(vh * cAR); sx = Math.round((vw - sw) / 2) }
-        else            { sh = Math.round(vw / cAR); sy = Math.round((vh - sh) / 2) }
-        ctx.drawImage(camVid, sx, sy, sw, sh, 0, 0, HUD_W, HUD_H)
-        // Waveguide tint — slight green-tinted dark veil
-        ctx.fillStyle = 'rgba(0,8,4,0.30)'
-        ctx.fillRect(0, 0, HUD_W, HUD_H)
-      } else {
-        ctx.fillStyle = '#020d06'
-        ctx.fillRect(0, 0, HUD_W, HUD_H)
-      }
+      ctx.fillStyle = '#020d06'
+      ctx.fillRect(0, 0, HUD_W, HUD_H)
 
       // ── Banner ───────────────────────────────────────────────────────────────
       if (s.bannerVisible && s.bannerText) {
@@ -1098,61 +1068,6 @@
         if (tab.dataset.tab === 'preview') start()
         else stop()
       })
-    })
-
-    // Camera toggle — tries three constraint sets to maximise compatibility
-    camBtn.addEventListener('click', async () => {
-      if (camStream) {
-        camStream.getTracks().forEach(t => t.stop())
-        camStream = null
-        camVid.srcObject = null
-        camBtn.textContent = 'Enable Camera'
-        camBtn.classList.remove('active')
-        return
-      }
-
-      // Log environment so we can see what's blocking the camera
-      const secureCtx = window.isSecureContext
-      const hasMD     = !!navigator.mediaDevices
-      const hasGUM    = !!navigator.mediaDevices?.getUserMedia
-      window.dispatchEvent(new CustomEvent('g2maps:status', {
-        detail: `camera: secureCtx=${secureCtx} mediaDevices=${hasMD} getUserMedia=${hasGUM} href=${location.href.slice(0,40)}`
-      }))
-
-      if (!hasGUM) {
-        const reason = !secureCtx ? 'needs HTTPS/localhost' : 'API not available in this WebView'
-        camBtn.textContent = reason
-        window.dispatchEvent(new CustomEvent('g2maps:status', { detail: `camera blocked: ${reason}` }))
-        setTimeout(() => { camBtn.textContent = 'Enable Camera' }, 4000)
-        return
-      }
-
-      // Try rear camera with ideal resolution, then any rear camera, then any camera
-      const attempts = [
-        { video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 } } },
-        { video: { facingMode: 'environment' } },
-        { video: true },
-      ]
-      let stream = null
-      let lastErr = null
-      for (const constraints of attempts) {
-        try { stream = await navigator.mediaDevices.getUserMedia(constraints); break }
-        catch (e) { lastErr = e }
-      }
-
-      if (!stream) {
-        const errMsg = lastErr ? `${lastErr.name}: ${lastErr.message}` : 'unknown'
-        window.dispatchEvent(new CustomEvent('g2maps:status', { detail: `camera failed: ${errMsg}` }))
-        camBtn.textContent = 'Camera unavailable'
-        setTimeout(() => { camBtn.textContent = 'Enable Camera' }, 3000)
-        return
-      }
-
-      camStream = stream
-      camVid.srcObject = stream
-      await camVid.play()
-      camBtn.textContent = 'Disable Camera'
-      camBtn.classList.add('active')
     })
   })()
 </script>
