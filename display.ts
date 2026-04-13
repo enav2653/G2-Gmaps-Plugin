@@ -1,4 +1,4 @@
-const MAX_INSTR = 35
+const MAX_INSTR = 28
 
 export function formatInstruction(text: string, maxLen = MAX_INSTR): string {
   const stripped = text.replace(/\s+towards?\s+.+$/i, '')
