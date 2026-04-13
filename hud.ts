@@ -90,25 +90,21 @@ export function buildBannerText(
   steps: RouteStep[],
   stepIdx: number,
   state: NavState,
-  bannerMode: BannerMode,
   liveDistM?: number,
 ): string {
-  if (state === 'idle')        return 'G2 Maps  •  Set a destination'
-  if (state === 'passive')     return 'Passive map  •  No active route'
-  if (state === 'paused')      return 'Navigation paused  •  Tap to resume'
+  if (state === 'idle')        return 'G2 Maps\nSet a destination'
+  if (state === 'passive')     return 'Passive map\nNo active route'
+  if (state === 'paused')      return 'Navigation paused\nTap to resume'
   if (state === 'calibrating') return 'Compass Calibration\nWave phone in figure-8 pattern'
 
   const step = steps[stepIdx]
-  if (!step) return 'Finding location…'
+  if (!step) return 'Finding location…\n'
 
   const instr = formatInstruction(step.instruction)
   const dist  = formatDistance(liveDistM ?? step.distanceMeters)
   const eta   = formatETA(steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0))
 
-  // Mode indicator shown in always-off / as-needed so user knows they're not stuck
-  const modeHint = bannerMode === 'always-on' ? '' : `\n${bannerModeLabel(bannerMode)}`
-
-  return `${instr}\n${dist}  •  ${stepIdx + 1}/${steps.length}  •  ETA ${eta}${modeHint}`
+  return `${instr}\n${dist}  •  ${stepIdx + 1}/${steps.length}  •  ETA ${eta}`
 }
 
 // ─── Speed block text ─────────────────────────────────────────────────────────

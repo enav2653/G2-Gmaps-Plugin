@@ -1,7 +1,8 @@
 const MAX_INSTR = 35
 
 export function formatInstruction(text: string, maxLen = MAX_INSTR): string {
-  const abbr = text
+  const stripped = text.replace(/\s+towards?\s+.+$/i, '')
+  const abbr = stripped
     .replace(/\bStreet\b/g,    'St')
     .replace(/\bAvenue\b/g,    'Ave')
     .replace(/\bBoulevard\b/g, 'Blvd')
@@ -12,7 +13,7 @@ export function formatInstruction(text: string, maxLen = MAX_INSTR): string {
     .replace(/\bNorthwest\b/g, 'NW').replace(/\bNortheast\b/g, 'NE')
     .replace(/\bSouthwest\b/g, 'SW').replace(/\bSoutheast\b/g, 'SE')
     .replace(/\bNorth\b/g, 'N').replace(/\bSouth\b/g, 'S')
-    .replace(/\bEast\b/g,  'E').replace(/\bWest\b/g,  'W')
+    .replace(/\bEast\b/g,  'E').replace(/\bWest\b/g,   'W')
 
   return abbr.length <= maxLen ? abbr : abbr.slice(0, maxLen - 1) + '…'
 }

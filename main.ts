@@ -661,7 +661,7 @@ async function buildPage() {
     const liveDistM = navState === 'navigating' && steps[esi]
       ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
       : undefined
-    const bannerContent = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
+    const bannerContent = buildBannerText(steps, esi, navState, liveDistM)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings)
 
     const textContainers: TextContainerProperty[] = [buildEventContainer()]
@@ -716,7 +716,7 @@ async function refreshBanner() {
   const liveDistM = navState === 'navigating' && steps[esi]
     ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
     : undefined
-  const content = buildBannerText(steps, esi, navState, bannerMode, liveDistM)
+  const content = buildBannerText(steps, esi, navState, liveDistM)
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.BANNER,
     containerName: 'banner',
@@ -1023,7 +1023,7 @@ export function getHudState() {
     ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
     : undefined
   return {
-    bannerText:     buildBannerText(steps, esi, navState, bannerMode, liveDistM),
+    bannerText:     buildBannerText(steps, esi, navState, liveDistM),
     bannerVisible:  bannerMode !== 'always-off',
     speedText:      buildSpeedText(speedMph, limitMph, settings),
     speedVisible:   settings.speed.visible,
