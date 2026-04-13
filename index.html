@@ -175,18 +175,15 @@
 
     /* ── Preview (HUD simulator) tab ── */
     .hud-sim-wrap    { flex: 1; display: flex; flex-direction: column; background: #000; overflow: hidden; }
+    /* position:relative + overflow:hidden so JS-rotated canvas stays clipped inside */
     .hud-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
-                       padding: 12px; background: #000; min-height: 0; }
-    /* Portrait: width-constrained — canvas fills available width up to its native size */
+                       padding: 12px; background: #000; min-height: 0;
+                       position: relative; overflow: hidden; }
+    /* Portrait default — width-constrained */
     #hud-canvas      { display: block; aspect-ratio: 576/288;
                        width: 100%; max-width: 576px;
                        image-rendering: pixelated; border-radius: 5px;
                        border: 0.5px solid rgba(255,255,255,0.12); }
-    /* Landscape: height-constrained — canvas fills available height and aspect ratio drives width */
-    @media (orientation: landscape) {
-      #hud-canvas    { width: auto; height: 100%; max-width: 100%; }
-      .hud-note      { display: none; }
-    }
     .hud-note        { flex-shrink: 0; padding: 8px 16px 12px;
                        font-size: 11px; color: var(--muted); text-align: center; background: #000; }
     .hud-rotate-hint { display: none; }
@@ -966,13 +963,57 @@
     const G_DIM    = '#009950'   // secondary / labels
     const G_FAINT  = '#005c2e'   // borders, dimmed elements
 
-    const canvas = document.getElementById('hud-canvas')
-    const ctx    = canvas.getContext('2d')
+    const canvas    = document.getElementById('hud-canvas')
+    const canvasWrap = canvas.parentElement
+    const ctx       = canvas.getContext('2d')
 
-    let animFrame   = null
-    let mapImg      = new Image()
-    let mapBytesRef = null
-    let mapBlobUrl  = null
+    let animFrame    = null
+    let mapImg       = new Image()
+    let mapBytesRef  = null
+    let mapBlobUrl   = null
+
+    // Physical orientation via DeviceOrientationEvent.gamma — works even when
+    // the WebView is portrait-locked (screen.orientation always reports portrait).
+    // gamma = left/right tilt: |gamma| > 50° means phone is held in landscape.
+    let lastGamma    = 0
+
+    function applyCanvasTransform() {
+      const landscape = Math.abs(lastGamma) > 50
+      if (landscape) {
+        // Compute the largest 2:1 canvas that fits the portrait viewport when rotated 90°.
+        // After rotation: visual width = CSS height, visual height = CSS width.
+        // Constraints: visual width  ≤ window.innerWidth
+        //              visual height ≤ canvasWrap.clientHeight (minus a little breathing room)
+        const maxVisW = window.innerWidth
+        const maxVisH = canvasWrap.clientHeight - 8
+        const cssH    = Math.min(maxVisW, maxVisH / 2)   // = visual width after rotation
+        const cssW    = cssH * 2                          // = visual height after rotation
+        const dir     = lastGamma > 0 ? -90 : 90          // match physical tilt direction
+        Object.assign(canvas.style, {
+          position:       'absolute',
+          top:            '50%',
+          left:           '50%',
+          width:          cssW + 'px',
+          height:         cssH + 'px',
+          maxWidth:       'none',
+          maxHeight:      'none',
+          transform:      `translateX(-50%) translateY(-50%) rotate(${dir}deg)`,
+          aspectRatio:    'auto',
+        })
+      } else {
+        // Portrait — let CSS take over again
+        canvas.removeAttribute('style')
+      }
+    }
+
+    window.addEventListener('deviceorientation', e => {
+      if (e.gamma === null) return
+      const wasLandscape = Math.abs(lastGamma) > 50
+      lastGamma = e.gamma
+      const isLandscape  = Math.abs(e.gamma) > 50
+      // Only re-layout when crossing the threshold (avoids constant style churn)
+      if (isLandscape !== wasLandscape) applyCanvasTransform()
+    }, true)
 
     // Keep the minimap image in sync with the byte array from main.ts
     function syncMinimapImg(bytes) {
@@ -1067,7 +1108,7 @@
       animFrame = requestAnimationFrame(draw)
     }
 
-    function start() { if (!animFrame) draw() }
+    function start() { if (!animFrame) { applyCanvasTransform(); draw() } }
     function stop()  { if (animFrame)  { cancelAnimationFrame(animFrame); animFrame = null } }
 
     document.querySelectorAll('.tab').forEach(tab => {
