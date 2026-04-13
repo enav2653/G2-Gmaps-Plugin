@@ -53,7 +53,7 @@ const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-
 const SPD_RIGHT_MARGIN = 8
 
 // Media container — bottom strip between minimap and speed
-const MEDIA_PAD = 6
+const MEDIA_PAD = 16
 const MEDIA_X   = MAP_PAD_L + MINIMAP_IMG_W + MEDIA_PAD          // 130
 const MEDIA_W   = CANVAS_W - MEDIA_X - (56 + SPD_RIGHT_MARGIN + MEDIA_PAD)  // 376
 
