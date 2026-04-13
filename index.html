@@ -177,9 +177,16 @@
     .hud-sim-wrap    { flex: 1; display: flex; flex-direction: column; background: #000; overflow: hidden; }
     .hud-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
                        padding: 12px; background: #000; min-height: 0; }
-    #hud-canvas      { width: 100%; max-width: 576px; aspect-ratio: 576/288;
+    /* Portrait: width-constrained — canvas fills available width up to its native size */
+    #hud-canvas      { display: block; aspect-ratio: 576/288;
+                       width: 100%; max-width: 576px;
                        image-rendering: pixelated; border-radius: 5px;
-                       border: 0.5px solid rgba(255,255,255,0.12); display: block; }
+                       border: 0.5px solid rgba(255,255,255,0.12); }
+    /* Landscape: height-constrained — canvas fills available height and aspect ratio drives width */
+    @media (orientation: landscape) {
+      #hud-canvas    { width: auto; height: 100%; max-width: 100%; }
+      .hud-note      { display: none; }
+    }
     .hud-note        { flex-shrink: 0; padding: 8px 16px 12px;
                        font-size: 11px; color: var(--muted); text-align: center; background: #000; }
     .hud-rotate-hint { display: none; }
