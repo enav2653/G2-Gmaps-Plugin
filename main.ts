@@ -144,7 +144,7 @@ async function fetchJsonTolerant(res: Response): Promise<any> {
   try { return JSON.parse(text.replace(/%[A-Z0-9_]+/g, 'null')) } catch { return null }
 }
 
-async function tryBridgeLocation(): Promise<{ lat: number; lng: number } | null> {
+async function tryBridgeLocation(): Promise<LocationFix | null> {
   // If we already found a working provider, use it directly
   if (activeLocationProvider) return activeLocationProvider()
 
@@ -1106,8 +1106,18 @@ async function init() {
   // so this won't interfere with a later navigation session.
   // Always start the poll loop; if Tasker isn't running yet, it retries every 2 s.
   tryBridgeLocation()
-    .then(loc => {
-      if (loc) { currentLat = loc.lat; currentLng = loc.lng }
+    .then(async loc => {
+      if (loc) {
+        currentLat = loc.lat
+        currentLng = loc.lng
+        if (loc.mediaTitle   !== undefined) mediaTitle   = loc.mediaTitle
+        if (loc.mediaArtist  !== undefined) mediaArtist  = loc.mediaArtist
+        if (loc.mediaPlaying !== undefined) mediaPlaying = loc.mediaPlaying
+        if (mediaPlaying) {
+          reportStatus(`media: playing — ${mediaTitle} / ${mediaArtist}`)
+          await buildPage()
+        }
+      }
       startAndroidPoll()
       if (!loc) startGPS()   // parallel fallback — harmless if Tasker picks up later
     })
