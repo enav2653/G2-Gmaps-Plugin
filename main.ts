@@ -10,6 +10,7 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
+import { formatClockTime } from './display'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import { renderMinimapBmp, renderCalibrationBmp } from './mapImage'
@@ -20,6 +21,7 @@ import {
   buildMinimapImageContainers,
   MAP_TILE_CIDS,
   buildSpeedContainer,
+  buildTimeContainer,
   buildBannerText,
   buildSpeedText,
   buildMediaText,
@@ -379,6 +381,7 @@ async function pollLocation() {
     } else {
       // In-place text update only — live updates without full rebuild
       await refreshBanner()
+      await refreshTime()
       await refreshSpeed()
       await refreshMinimap()
       if (mediaPlaying) await refreshMedia()
@@ -670,6 +673,7 @@ async function buildPage() {
       const mediaContainer = buildMediaContainer(buildMediaText(mediaTitle, mediaArtist))
       if (mediaContainer) textContainers.push(mediaContainer)
     }
+    textContainers.push(buildTimeContainer(formatClockTime()))
 
     const imageContainers: ImageContainerProperty[] = [
       ...buildMinimapImageContainers(settings),
@@ -718,6 +722,17 @@ async function refreshBanner() {
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.BANNER,
     containerName: 'banner',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
+}
+
+async function refreshTime() {
+  const content = formatClockTime()
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.CLOCK,
+    containerName: 'clock',
     content,
     contentOffset: 0,
     contentLength: content.length,
@@ -819,6 +834,7 @@ function startGPS() {
       if (!stepped) {
         // Same step — refresh text in-place
         await refreshBanner()
+        await refreshTime()
         await refreshSpeed()
         await refreshMinimap()
         return

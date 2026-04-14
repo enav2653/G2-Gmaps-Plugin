@@ -34,3 +34,11 @@ export function formatETA(seconds: number): string {
   const h = Math.floor(minutes / 60), m = minutes % 60
   return m > 0 ? `${h} hr ${m} min` : `${h} hr`
 }
+
+export function formatClockTime(date: Date = new Date()): string {
+  const h    = date.getHours()
+  const m    = date.getMinutes()
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const h12  = h % 12 || 12
+  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`
+}
