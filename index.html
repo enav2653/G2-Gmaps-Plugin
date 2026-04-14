@@ -237,7 +237,7 @@
 <!-- ── Tab bar ── -->
 <div class="tabs">
   <div class="tab active" data-tab="nav">Navigate</div>
-  <div class="tab" data-tab="settings">HUD settings</div>
+  <div class="tab" data-tab="settings">Settings</div>
   <div class="tab" data-tab="preview">Preview</div>
 </div>
 
@@ -278,7 +278,7 @@
 
 
 <!-- ══════════════════════════════════════════
-     TAB 3 — HUD Settings
+     TAB 3 — Settings
      ══════════════════════════════════════════ -->
 <div class="panel" id="panel-settings">
 
@@ -298,22 +298,6 @@
 
   <div class="settings-section">Minimap</div>
 
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Size</span>
-      <span class="setting-val" id="map-size-val">100%</span>
-    </div>
-    <input type="range" id="map-size" min="50" max="150" step="1" value="100">
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Brightness</span>
-      <span class="setting-val" id="map-bright-val">100%</span>
-    </div>
-    <input type="range" id="map-bright" min="20" max="100" step="1" value="100">
-  </div>
-
   <div class="toggle-row">
     <div class="toggle-info">
       <div class="toggle-label">Show minimap</div>
@@ -327,22 +311,6 @@
   </div>
 
   <div class="settings-section">Speed readout</div>
-
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Size</span>
-      <span class="setting-val" id="spd-size-val">100%</span>
-    </div>
-    <input type="range" id="spd-size" min="50" max="150" step="1" value="100">
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Brightness</span>
-      <span class="setting-val" id="spd-bright-val">100%</span>
-    </div>
-    <input type="range" id="spd-bright" min="20" max="100" step="1" value="100">
-  </div>
 
   <div class="toggle-row">
     <div class="toggle-info">
@@ -366,33 +334,6 @@
       <div class="toggle-bg"></div>
       <div class="toggle-thumb"></div>
     </label>
-  </div>
-
-  <!-- Live preview -->
-  <div class="preview-wrap">
-    <div class="preview-label">Live preview</div>
-    <div class="preview-screen">
-      <div class="p-minimap" id="p-minimap">
-        <svg viewBox="0 0 68 88" xmlns="http://www.w3.org/2000/svg">
-          <rect width="68" height="88" fill="#12121e"/>
-          <rect x="0" y="42" width="68" height="5" fill="#2a2a3e"/>
-          <rect x="30" y="0" width="5" height="88" fill="#2a2a3e"/>
-          <line x1="0" y1="18" x2="32" y2="44" stroke="#2a2a3e" stroke-width="3"/>
-          <rect x="2" y="2" width="25" height="37" rx="1" fill="#1a1a2e"/>
-          <rect x="38" y="2" width="28" height="37" rx="1" fill="#1a1a2e"/>
-          <rect x="38" y="50" width="28" height="35" rx="1" fill="#1a1a2e"/>
-          <rect x="2" y="50" width="25" height="35" rx="1" fill="#1a1a2e"/>
-          <polygon points="34,32 29,44 39,44" fill="#378ADD" opacity="0.5"/>
-          <circle cx="34" cy="44" r="4" fill="#378ADD" opacity="0.9"/>
-          <text x="62" y="10" font-size="7" fill="#444460" text-anchor="end" font-family="sans-serif">N</text>
-        </svg>
-      </div>
-      <div class="p-speed" id="p-speed">
-        <div class="p-speed-num" id="p-speed-num" style="font-size:18px">28</div>
-        <div class="p-speed-unit" id="p-speed-unit" style="font-size:8px">mph</div>
-        <div class="p-speed-limit" id="p-speed-limit" style="font-size:8px;padding:1px 5px">35</div>
-      </div>
-    </div>
   </div>
 
   <div class="settings-section">Compass</div>
@@ -905,92 +846,29 @@
 
   // ── Settings tab ───────────────────────────────────────────────────────────
   const settingsEls = {
-    mapSize:      document.getElementById('map-size'),
-    mapBright:    document.getElementById('map-bright'),
     mapVisible:   document.getElementById('map-visible'),
-    spdSize:      document.getElementById('spd-size'),
-    spdBright:    document.getElementById('spd-bright'),
     spdVisible:   document.getElementById('spd-visible'),
     limitVisible: document.getElementById('limit-visible'),
   }
 
   function loadUIFromSettings() {
     const s = loadSettings()
-    settingsEls.mapSize.value      = s.minimap.size
-    settingsEls.mapBright.value    = s.minimap.brightness
-    settingsEls.mapVisible.checked = s.minimap.visible
-    settingsEls.spdSize.value      = s.speed.size
-    settingsEls.spdBright.value    = s.speed.brightness
-    settingsEls.spdVisible.checked = s.speed.visible
-    settingsEls.limitVisible.checked = s.speed.showLimit
-    updatePreview()
+    settingsEls.mapVisible.checked    = s.minimap.visible
+    settingsEls.spdVisible.checked    = s.speed.visible
+    settingsEls.limitVisible.checked  = s.speed.showLimit
   }
-
-  function updatePreview() {
-    const ms = parseInt(settingsEls.mapSize.value)
-    const mb = parseInt(settingsEls.mapBright.value)
-    const mv = settingsEls.mapVisible.checked
-    const ss = parseInt(settingsEls.spdSize.value)
-    const sb = parseInt(settingsEls.spdBright.value)
-    const sv = settingsEls.spdVisible.checked
-    const lv = settingsEls.limitVisible.checked
-
-    document.getElementById('map-size-val').textContent   = ms + '%'
-    document.getElementById('map-bright-val').textContent = mb + '%'
-    document.getElementById('spd-size-val').textContent   = ss + '%'
-    document.getElementById('spd-bright-val').textContent = sb + '%'
-
-    const scr   = document.querySelector('.preview-screen')
-    const scrH  = scr.offsetHeight || 110
-    const mapWpx = (80 * ms / 100) / (88 * ms / 100) * (88 * ms / 100 / 288 * scrH)
-    const mapHpx = (88 * ms / 100) / 288 * scrH
-
-    const pm = document.getElementById('p-minimap')
-    pm.style.width   = Math.max(12, mapWpx) + 'px'
-    pm.style.height  = Math.max(12, mapHpx) + 'px'
-    pm.style.opacity = mv ? (mb / 100) : 0
-
-    const ps = document.getElementById('p-speed')
-    ps.style.opacity = sv ? (sb / 100) : 0
-
-    const numPx  = Math.max(8, (scrH / 288) * 22 * ss / 100)
-    const unitPx = Math.max(6, (scrH / 288) * 9  * ss / 100)
-    const limPx  = Math.max(6, (scrH / 288) * 8  * ss / 100)
-
-    document.getElementById('p-speed-num').style.fontSize   = numPx  + 'px'
-    document.getElementById('p-speed-unit').style.fontSize  = unitPx + 'px'
-    document.getElementById('p-speed-limit').style.fontSize = limPx  + 'px'
-    document.getElementById('p-speed-limit').style.padding  = `${limPx*0.15}px ${limPx*0.6}px`
-    document.getElementById('p-speed-limit').style.display  = lv ? '' : 'none'
-  }
-
-  Object.values(settingsEls).forEach(el => el.addEventListener('input', updatePreview))
 
   document.getElementById('reset-btn').addEventListener('click', () => {
     const d = DEFAULT_SETTINGS
-    settingsEls.mapSize.value        = d.minimap.size
-    settingsEls.mapBright.value      = d.minimap.brightness
     settingsEls.mapVisible.checked   = d.minimap.visible
-    settingsEls.spdSize.value        = d.speed.size
-    settingsEls.spdBright.value      = d.speed.brightness
     settingsEls.spdVisible.checked   = d.speed.visible
     settingsEls.limitVisible.checked = d.speed.showLimit
-    updatePreview()
   })
 
   document.getElementById('save-btn').addEventListener('click', async () => {
     const s = {
-      minimap: {
-        size:       parseInt(settingsEls.mapSize.value),
-        brightness: parseInt(settingsEls.mapBright.value),
-        visible:    settingsEls.mapVisible.checked,
-      },
-      speed: {
-        size:       parseInt(settingsEls.spdSize.value),
-        brightness: parseInt(settingsEls.spdBright.value),
-        visible:    settingsEls.spdVisible.checked,
-        showLimit:  settingsEls.limitVisible.checked,
-      },
+      minimap: { visible: settingsEls.mapVisible.checked },
+      speed:   { visible: settingsEls.spdVisible.checked, showLimit: settingsEls.limitVisible.checked },
     }
     saveSettings(s)
     await reloadSettings()
@@ -1053,11 +931,12 @@
 
   ;(function () {
     const HUD_W = 576, HUD_H = 288
-    const BANNER_H  = 64
+    const BANNER_H  = 80
     const BOTTOM_Y  = 196
     const MINIMAP_Y = 164, MINIMAP_W = 124, MINIMAP_H = 124
     const SPEED_X   = 512, SPEED_W = 56
-    const MEDIA_X   = 130
+    const CLOCK_X   = 476, CLOCK_W = 100
+    const MEDIA_X   = 152
 
     // Phosphor-green palette matching the G2 waveguide display
     const G_BRIGHT = '#00e87a'   // main text
@@ -1172,7 +1051,7 @@
       // ── Banner ───────────────────────────────────────────────────────────────
       if (s.bannerVisible && s.bannerText) {
         ctx.fillStyle = 'rgba(0,18,8,0.35)'
-        ctx.fillRect(0, 0, HUD_W, BANNER_H)
+        ctx.fillRect(0, 0, CLOCK_X, BANNER_H)
         ctx.textAlign = 'left'
         const lines = s.bannerText.split('\n')
         lines.forEach((line, i) => {
@@ -1180,8 +1059,24 @@
             ? "bold 17px 'Courier New', Courier, monospace"
             : "13px 'Courier New', Courier, monospace"
           ctx.fillStyle = i === 0 ? G_BRIGHT : G_DIM
-          ctx.fillText(line, 6, 22 + i * 21, HUD_W - 12)
+          ctx.fillText(line, 6, 22 + i * 21, CLOCK_X - 12)
         })
+      }
+
+      // ── Clock ────────────────────────────────────────────────────────────────
+      {
+        const now  = new Date()
+        const h    = now.getHours(), m = now.getMinutes()
+        const ampm = h >= 12 ? 'PM' : 'AM'
+        const h12  = h % 12 || 12
+        const txt  = `${h12}:${String(m).padStart(2,'0')} ${ampm}`
+        ctx.fillStyle = 'rgba(0,18,8,0.35)'
+        ctx.fillRect(CLOCK_X, 0, CLOCK_W, 40)
+        ctx.font      = "11px 'Courier New', Courier, monospace"
+        ctx.fillStyle = G_DIM
+        ctx.textAlign = 'right'
+        ctx.fillText(txt, CLOCK_X + CLOCK_W - 4, 18)
+        ctx.textAlign = 'left'
       }
 
       // ── Minimap image (green-tinted via canvas filter) ────────────────────────
