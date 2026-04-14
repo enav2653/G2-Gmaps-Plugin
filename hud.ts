@@ -53,6 +53,9 @@ const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
 
+// Clock container — top-right corner
+const CLOCK_W = 100
+
 // Media container — bottom strip between minimap and speed
 const MEDIA_PAD = 28
 const MEDIA_X   = MAP_PAD_L + MINIMAP_IMG_W + MEDIA_PAD          // 130
@@ -153,14 +156,14 @@ export function buildEventContainer(): TextContainerProperty {
   })
 }
 
-/** Banner text container — top strip. */
+/** Banner text container — top strip. Width leaves room for clock in top-right. */
 export function buildBannerContainer(content: string): TextContainerProperty {
   return new TextContainerProperty({
     containerID:   CID.BANNER,
     containerName: 'banner',
     xPosition:     0,
     yPosition:     0,
-    width:         CANVAS_W,
+    width:         CANVAS_W - CLOCK_W,
     height:        BANNER_H,
     borderWidth:   0,
     borderColor:   0,
@@ -229,9 +232,6 @@ export function buildMediaContainer(content: string): TextContainerProperty | nu
     isEventCapture: 0,
   })
 }
-
-// Clock time display — top-right corner, always present
-const CLOCK_W = 100
 
 /** Clock time container — top-right corner. Always present. */
 export function buildTimeContainer(content: string): TextContainerProperty {
