@@ -187,10 +187,31 @@ function renderPixels(
         ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
         : []
 
-    for (let j = 0; j < pts.length - 1; j++) {
-      const [px0, py0] = toPixel(pts[j][0],     pts[j][1])
-      const [px1, py1] = toPixel(pts[j + 1][0], pts[j + 1][1])
-      drawLine(px0, py0, px1, py1, v, thick)
+    if (current && pts.length >= 2) {
+      // Split the current step at the nearest polyline point to the user.
+      // Segments before that point render as past (50, thin); segments from
+      // that point onward render as current (240, thick).  This makes the
+      // step-advance transition gradual rather than a sudden full-line swap.
+      let splitIdx = 0
+      let nearestSq = Infinity
+      for (let k = 0; k < pts.length; k++) {
+        const dlat = lat - pts[k][0]
+        const dlng = (lng - pts[k][1]) * cosLat
+        const dsq  = dlat * dlat + dlng * dlng
+        if (dsq < nearestSq) { nearestSq = dsq; splitIdx = k }
+      }
+      for (let j = 0; j < pts.length - 1; j++) {
+        const sv = j < splitIdx ? 50 : 240
+        const [px0, py0] = toPixel(pts[j][0], pts[j][1])
+        const [px1, py1] = toPixel(pts[j + 1][0], pts[j + 1][1])
+        drawLine(px0, py0, px1, py1, sv, j >= splitIdx)
+      }
+    } else {
+      for (let j = 0; j < pts.length - 1; j++) {
+        const [px0, py0] = toPixel(pts[j][0],     pts[j][1])
+        const [px1, py1] = toPixel(pts[j + 1][0], pts[j + 1][1])
+        drawLine(px0, py0, px1, py1, v, thick)
+      }
     }
 
     // Close any pixel gap at the junction between this step and the next.
