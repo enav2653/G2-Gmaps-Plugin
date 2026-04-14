@@ -774,28 +774,11 @@
   })
 
   // ── Save current GPS location as favorite ─────────────────────────────────
-  document.getElementById('fav-save-here-btn').addEventListener('click', async () => {
+  document.getElementById('fav-save-here-btn').addEventListener('click', () => {
     const pos = getCurrentLocation()
     if (!pos) { setStatus('No GPS fix yet', 'warn'); return }
-    const coordLabel = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`
-    // Open immediately with coordinates so the button always responds
-    openFavModal({ lat: pos.lat, lng: pos.lng, label: coordLabel, name: coordLabel }, coordLabel)
-    // Reverse-geocode in background; update modal if still open and user hasn't edited
-    try {
-      const geocoder = new google.maps.Geocoder()
-      geocoder.geocode({ location: pos }, (results, status) => {
-        if (status !== 'OK' || !results[0]) return
-        if (!favModal.classList.contains('open')) return
-        if (pendingFavLoc?.lat !== pos.lat || pendingFavLoc?.lng !== pos.lng) return
-        const label = results[0].formatted_address
-        const name  = results[0].address_components?.[0]?.short_name || label
-        pendingFavLoc.label = label
-        pendingFavLoc.name  = name
-        if (favModalInput.value === coordLabel) favModalInput.value = name
-        if (favModalInput.value === coordLabel) favModalInput.select()
-        favModalAddr.textContent = label !== name ? label : ''
-      })
-    } catch { /* keep coords */ }
+    const label = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`
+    openFavModal({ lat: pos.lat, lng: pos.lng, label, name: label }, label)
   })
 
   // ── Navigate ───────────────────────────────────────────────────────────────
