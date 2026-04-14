@@ -210,10 +210,10 @@ export function buildMinimapImageContainers(
   })]
 }
 
-/** Now-playing text container — bottom strip, between minimap and speed. */
+/** Now-playing text container — bottom strip, between minimap and speed.
+ *  Caller is responsible for windowing/scrolling long strings before passing in. */
 export function buildMediaText(title: string, artist: string): string {
-  const cap = (s: string) => s.length > 38 ? s.slice(0, 37) + '…' : s
-  return `${cap(title)}\n${cap(artist)}`
+  return `${title}\n${artist}`
 }
 
 export function buildMediaContainer(content: string): TextContainerProperty | null {

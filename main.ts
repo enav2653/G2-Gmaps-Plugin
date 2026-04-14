@@ -77,6 +77,14 @@ let mediaTitle   = ''
 let mediaArtist  = ''
 let mediaPlaying = false
 
+// Media marquee — soft scrolling for long title/artist lines
+const MEDIA_LINE_W    = 22   // safe character width for media container on G2
+const MEDIA_SCROLL_MS = 400  // ms between scroll ticks
+const MEDIA_SCROLL_STEP = 2  // characters advanced per tick
+let mediaScrollTitle  = 0
+let mediaScrollArtist = 0
+let mediaMarqueeTimer: ReturnType<typeof setInterval> | null = null
+
 // Speed calculation from consecutive position fixes
 let prevPollLat  = 0
 let prevPollLng  = 0
@@ -110,8 +118,10 @@ const CAL_ROT_DEG  = 360 // total rotation needed
 const CAL_TILT_DEG = 90  // total tilt travel needed
 const CAL_ROLL_DEG = 90  // total roll travel needed
 
-// Reroute guard
-let rerouteInProgress = false
+// Reroute guard + off-route hysteresis
+let rerouteInProgress   = false
+let offRouteSamples     = 0    // consecutive polls where we appeared off-route
+let lastStepAdvanceTime = 0    // timestamp of the last step index change
 
 // ─── Bridge location probe ────────────────────────────────────────────────────
 //
@@ -348,11 +358,15 @@ async function pollLocation() {
   if (mediaStateChanged) {
     if (mediaPlaying) {
       reportStatus(`media: playing — ${mediaTitle} / ${mediaArtist}`)
+      mediaScrollTitle = 0; mediaScrollArtist = 0
+      startMediaMarquee()
     } else {
       reportStatus('media: stopped')
+      stopMediaMarquee()
     }
   } else if (trackChanged) {
     reportStatus(`media: track — ${mediaTitle} / ${mediaArtist}`)
+    mediaScrollTitle = 0; mediaScrollArtist = 0
   }
 
   if (navState !== 'navigating') {
@@ -367,20 +381,34 @@ async function pollLocation() {
     return
   }
 
-  // Off-route detection — only when step has valid coordinates
-  if (!rerouteInProgress && steps[stepIdx]) {
+  // Off-route detection — uses full step polyline for accuracy on curved roads.
+  // Requires 2 consecutive off-route readings to avoid triggering on GPS glitches.
+  // Suppressed for 5 s after any step advance to avoid false positives at intersections.
+  if (!rerouteInProgress && steps[stepIdx] && Date.now() - lastStepAdvanceTime > 5000) {
     const s = steps[stepIdx]
-    if ((s.startLat || s.startLng) && (s.endLat || s.endLng)) {
-      const offDist = distToSegmentM(loc.lat, loc.lng, s.startLat, s.startLng, s.endLat, s.endLng)
-      if (offDist > 150) {
-        await reroute()
-        return
+    // Prefer the full decoded polyline; fall back to start→end segment
+    const pts: Array<[number, number]> = s.polylinePoints.length >= 2
+      ? s.polylinePoints
+      : (s.startLat || s.startLng) && (s.endLat || s.endLng)
+        ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
+        : []
+    if (pts.length >= 2) {
+      const offDist = distToPolylineM(loc.lat, loc.lng, pts)
+      if (offDist > 200) {
+        if (++offRouteSamples >= 2) {
+          offRouteSamples = 0
+          await reroute()
+          return
+        }
+      } else {
+        offRouteSamples = 0
       }
     }
   }
 
   const newIdx  = advanceStep(loc.lat, loc.lng)
   const stepped = newIdx !== stepIdx
+  if (stepped) { lastStepAdvanceTime = Date.now(); offRouteSamples = 0 }
   stepIdx = newIdx
 
   if (stepIdx >= steps.length) {
@@ -604,6 +632,51 @@ function distToSegmentM(
   return haversine(lat, lng, aLat + t*dy, aLng + t*(bLng - aLng))
 }
 
+// ─── Media marquee helpers ────────────────────────────────────────────────────
+
+/** Returns a MEDIA_LINE_W-char window into text, scrolled by offset.
+ *  If text fits, returns it unchanged (no scroll needed). */
+function mediaWindow(text: string, offset: number): string {
+  if (text.length <= MEDIA_LINE_W) return text
+  const padded = text + '    '   // gap before loop-back
+  const len    = padded.length
+  const start  = offset % len
+  return (padded + padded).slice(start, start + MEDIA_LINE_W)
+}
+
+function startMediaMarquee() {
+  if (mediaMarqueeTimer) return
+  mediaMarqueeTimer = setInterval(() => {
+    if (!mediaPlaying || !pageCreated) return
+    let changed = false
+    if (mediaTitle.length > MEDIA_LINE_W) {
+      mediaScrollTitle = (mediaScrollTitle + MEDIA_SCROLL_STEP) % (mediaTitle.length + 4)
+      changed = true
+    }
+    if (mediaArtist.length > MEDIA_LINE_W) {
+      mediaScrollArtist = (mediaScrollArtist + MEDIA_SCROLL_STEP) % (mediaArtist.length + 4)
+      changed = true
+    }
+    if (changed) refreshMedia().catch(() => {})
+  }, MEDIA_SCROLL_MS)
+}
+
+function stopMediaMarquee() {
+  if (mediaMarqueeTimer) { clearInterval(mediaMarqueeTimer); mediaMarqueeTimer = null }
+}
+
+/** Minimum distance in metres from a point to any segment in a polyline. */
+function distToPolylineM(lat: number, lng: number, pts: Array<[number, number]>): number {
+  if (pts.length === 0) return Infinity
+  if (pts.length === 1) return haversine(lat, lng, pts[0][0], pts[0][1])
+  let best = Infinity
+  for (let i = 0; i < pts.length - 1; i++) {
+    const d = distToSegmentM(lat, lng, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1])
+    if (d < best) best = d
+  }
+  return best
+}
+
 /** Metres from current position to the end of the current route step. */
 function distToManeuverM(): number {
   const step = steps[stepIdx]
@@ -621,13 +694,13 @@ function effectiveStepIdx(): number {
  *  Threshold scales with speed but is also capped at 40% of the step's own
  *  distance, so short interchange/ramp steps don't trigger prematurely when
  *  the speed-based radius exceeds the step length itself.
- *    20 mph → ~134 m   40 mph → ~268 m   60 mph → ~402 m  (before step cap) */
+ *    20 mph → ~60 m   40 mph → ~120 m   60 mph → ~180 m  (before step cap) */
 function advanceStep(lat: number, lng: number): number {
   for (let i = stepIdx; i < steps.length - 1; i++) {
     const s = steps[i]
     if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
     const threshold = Math.min(
-      Math.max(30, speedMph * 6.7),        // speed-scaled lookahead, floor 30 m
+      Math.max(30, speedMph * 3.0),        // speed-scaled lookahead, floor 30 m
       Math.max(30, s.distanceMeters * 0.4) // cap at 40% of this step's length
     )
     if (haversine(lat, lng, s.endLat, s.endLng) < threshold) return i + 1
@@ -663,6 +736,7 @@ async function reroute() {
 // encodes as PNG, uploads via updateImageRawData.  No API calls.
 
 let minimapRefreshing = false
+let minimapPendingRefresh = false   // re-render queued while a render was in-flight
 let lastMinimapBytes: number[] | null = null
 
 const MINIMAP_ZOOM = 14  // fixed — passive-mode level; dynamic zoom caused thrashing
@@ -690,7 +764,10 @@ async function buildPage() {
     const speedContainer = buildSpeedContainer(speedContent, settings)
     if (speedContainer) textContainers.push(speedContainer)
     if (mediaPlaying) {
-      const mediaContainer = buildMediaContainer(buildMediaText(mediaTitle, mediaArtist))
+      const mediaContainer = buildMediaContainer(buildMediaText(
+        mediaWindow(mediaTitle,  mediaScrollTitle),
+        mediaWindow(mediaArtist, mediaScrollArtist),
+      ))
       if (mediaContainer) textContainers.push(mediaContainer)
     }
     textContainers.push(buildTimeContainer(formatClockTime()))
@@ -773,7 +850,10 @@ async function refreshSpeed() {
 
 async function refreshMedia() {
   if (!mediaPlaying) return
-  const content = buildMediaText(mediaTitle, mediaArtist)
+  const content = buildMediaText(
+    mediaWindow(mediaTitle,  mediaScrollTitle),
+    mediaWindow(mediaArtist, mediaScrollArtist),
+  )
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.MEDIA,
     containerName: 'media',
@@ -787,9 +867,13 @@ async function refreshMinimap() {
   if (navState === 'calibrating') return
   if (!settings.minimap.visible || !pageCreated) return
   if (!currentLat && !currentLng) return
-  if (minimapRefreshing) return
+  if (minimapRefreshing) {
+    minimapPendingRefresh = true   // re-render once current one finishes
+    return
+  }
 
   minimapRefreshing = true
+  minimapPendingRefresh = false
   try {
     // Kick off a background road-data refresh (non-blocking; uses cached data this frame)
     refreshRoads(currentLat, currentLng, MINIMAP_ZOOM, MINIMAP_IMG_W, MINIMAP_IMG_H).catch(() => {})
@@ -811,6 +895,8 @@ async function refreshMinimap() {
     reportStatus(`minimap: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
     minimapRefreshing = false
+    // If a rebuild happened while we were rendering, fire another pass now
+    if (minimapPendingRefresh) refreshMinimap().catch(() => {})
   }
 }
 
