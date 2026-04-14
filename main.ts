@@ -642,13 +642,7 @@ async function reroute() {
 let minimapRefreshing = false
 let lastMinimapBytes: number[] | null = null
 
-function minimapZoom(): number {
-  const d = distToManeuverM()
-  if (d <   400) return 17
-  if (d <  1600) return 16
-  if (d <  5000) return 15
-  return 14
-}
+const MINIMAP_ZOOM = 14  // fixed — passive-mode level; dynamic zoom caused thrashing
 
 // ─── Full page build ──────────────────────────────────────────────────────────
 
@@ -763,11 +757,11 @@ async function refreshMinimap() {
   minimapRefreshing = true
   try {
     // Kick off a background road-data refresh (non-blocking; uses cached data this frame)
-    refreshRoads(currentLat, currentLng, minimapZoom(), MINIMAP_IMG_W, MINIMAP_IMG_H).catch(() => {})
+    refreshRoads(currentLat, currentLng, MINIMAP_ZOOM, MINIMAP_IMG_W, MINIMAP_IMG_H).catch(() => {})
 
     const imageData = renderMinimapBmp(
       currentLat, currentLng, steps, effectiveStepIdx(),
-      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
+      MINIMAP_IMG_W, MINIMAP_IMG_H, MINIMAP_ZOOM,
       getCachedRoads(),
       activeHeadingDeg(),
     )
