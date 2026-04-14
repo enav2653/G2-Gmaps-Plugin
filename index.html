@@ -282,6 +282,19 @@
      ══════════════════════════════════════════ -->
 <div class="panel" id="panel-settings">
 
+  <div class="settings-section">Routing</div>
+
+  <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:6px">
+    <div class="toggle-info">
+      <div class="toggle-label">Google Maps API key <span style="font-weight:400;opacity:.6">(optional)</span></div>
+      <div class="toggle-sub">Leave empty to use free OpenStreetMap routing &amp; search. Paste your key to enable Google Routes and Places autocomplete.</div>
+    </div>
+    <input type="text" id="gmaps-key-input" placeholder="AIza…"
+      style="font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid #333;
+             background:#111;color:#eee;width:100%;box-sizing:border-box;font-family:monospace">
+    <div id="gmaps-key-status" style="font-size:11px;opacity:.6;min-height:14px"></div>
+  </div>
+
   <div class="settings-section">Diagnostics</div>
 
   <div class="toggle-row">
@@ -315,7 +328,7 @@
   <div class="toggle-row">
     <div class="toggle-info">
       <div class="toggle-label">Show speed limit badge</div>
-      <div class="toggle-sub">Requires speed limit data from Google</div>
+      <div class="toggle-sub">Via OpenStreetMap (coverage varies by region)</div>
     </div>
     <label class="toggle">
       <input type="checkbox" id="limit-visible" checked>
@@ -433,25 +446,12 @@
 </div>
 
 <script type="module">
-  import { geocode }           from './maps.ts'
+  import { geocode, setGoogleMapsKey, hasGoogleMapsKey } from './maps.ts'
   import { startNavigation, menuPauseResume, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState, getCurrentLocation } from './main.ts'
-  import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './settings.ts'
+  import { saveSettings, loadSettings, DEFAULT_SETTINGS, persistGet, persistSet } from './settings.ts'
 
-  const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
-
-  // ── Persistent storage: localStorage + cookie fallback ─────────────────────
-  // Flutter InAppWebView may clear localStorage between launches. Cookies
-  // use Android CookieManager which has a separate lifecycle and persists.
-  function persistGet(key) {
-    try { const v = localStorage.getItem(key); if (v !== null) return v } catch {}
-    const m = document.cookie.split('; ').find(r => r.startsWith(encodeURIComponent(key) + '='))
-    return m ? decodeURIComponent(m.split('=')[1]) : null
-  }
-  function persistSet(key, value) {
-    try { localStorage.setItem(key, value) } catch {}
-    const exp = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toUTCString()
-    document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}; expires=${exp}; path=/; SameSite=Lax`
-  }
+  const MAPS_KEY = persistGet('g2maps_gmaps_key') || import.meta.env.VITE_GOOGLE_MAPS_KEY || ''
+  if (MAPS_KEY) setGoogleMapsKey(MAPS_KEY)
 
   // ── Diagnostics ───────────────────────────────────────────────────────────
   const debugLog = document.getElementById('debug-log')
@@ -503,10 +503,15 @@
   let selectedLocation = null
   let debounce = null
 
-  const script = document.createElement('script')
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&loading=async&v=weekly`
-  script.async = true
-  document.head.appendChild(script)
+  function loadGoogleMapsJs(key) {
+    if (!key || window.__gmapsLoaded) return
+    window.__gmapsLoaded = true
+    const s = document.createElement('script')
+    s.src   = `https://maps.googleapis.com/maps/api/js?key=${key}&loading=async&v=weekly`
+    s.async = true
+    document.head.appendChild(s)
+  }
+  loadGoogleMapsJs(MAPS_KEY)
 
   // ── Persistence helpers ────────────────────────────────────────────────────
   function loadFavorites() {
@@ -716,30 +721,60 @@
 
   // ── Autocomplete ───────────────────────────────────────────────────────────
   async function fetchAutocompleteSuggestions(q) {
-    const { AutocompleteSuggestion } = await google.maps.importLibrary('places')
-    const { suggestions: preds } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: q })
-    if (!preds?.length) { suggestions.classList.remove('open'); return }
-    suggestions.innerHTML = preds.slice(0, 5).map(p => {
-      const pred = p.placePrediction
-      return `<div class="suggestion" data-place-id="${esc(pred.placeId)}">
-        <div class="sug-icon">⊙</div>
-        <div class="sug-body">
-          <div class="sug-name">${esc(pred.mainText.text)}</div>
-          <div class="sug-addr">${esc(pred.secondaryText?.text ?? '')}</div>
-        </div>
-      </div>`
-    }).join('')
-    suggestions.classList.add('open')
-    suggestions.querySelectorAll('.suggestion[data-place-id]').forEach(el => {
-      el.addEventListener('click', async () => {
-        const name = el.querySelector('.sug-name').textContent
-        const { Place } = await google.maps.importLibrary('places')
-        const place = new Place({ id: el.dataset.placeId })
-        await place.fetchFields({ fields: ['location', 'formattedAddress'] })
-        selectLocation({ lat: place.location.lat(), lng: place.location.lng(),
-                         name, label: place.formattedAddress })
+    if (hasGoogleMapsKey() && typeof google !== 'undefined' && google.maps) {
+      // ── Google Places ──────────────────────────────────────────────────────
+      const { AutocompleteSuggestion } = await google.maps.importLibrary('places')
+      const { suggestions: preds } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: q })
+      if (!preds?.length) { suggestions.classList.remove('open'); return }
+      suggestions.innerHTML = preds.slice(0, 5).map(p => {
+        const pred = p.placePrediction
+        return `<div class="suggestion" data-place-id="${esc(pred.placeId)}">
+          <div class="sug-icon">⊙</div>
+          <div class="sug-body">
+            <div class="sug-name">${esc(pred.mainText.text)}</div>
+            <div class="sug-addr">${esc(pred.secondaryText?.text ?? '')}</div>
+          </div>
+        </div>`
+      }).join('')
+      suggestions.classList.add('open')
+      suggestions.querySelectorAll('.suggestion[data-place-id]').forEach(el => {
+        el.addEventListener('click', async () => {
+          const name = el.querySelector('.sug-name').textContent
+          const { Place } = await google.maps.importLibrary('places')
+          const place = new Place({ id: el.dataset.placeId })
+          await place.fetchFields({ fields: ['location', 'formattedAddress'] })
+          selectLocation({ lat: place.location.lat(), lng: place.location.lng(),
+                           name, label: place.formattedAddress })
+        })
       })
-    })
+    } else {
+      // ── Nominatim (OSM) fallback ───────────────────────────────────────────
+      const url = new URL('https://nominatim.openstreetmap.org/search')
+      url.searchParams.set('q', q)
+      url.searchParams.set('format', 'json')
+      url.searchParams.set('limit', '5')
+      url.searchParams.set('addressdetails', '0')
+      const res = await fetch(url.toString(), {
+        headers: { 'User-Agent': 'G2-Maps-GlassesApp/0.3 (personal navigation)' }
+      })
+      const data = await res.json()
+      if (!data?.length) { suggestions.classList.remove('open'); return }
+      suggestions.innerHTML = data.map(r => {
+        const parts = r.display_name.split(', ')
+        const name  = parts[0]
+        const addr  = parts.slice(1).join(', ')
+        return `<div class="suggestion" data-lat="${r.lat}" data-lng="${r.lon}"
+                     data-name="${esc(name)}" data-label="${esc(r.display_name)}">
+          <div class="sug-icon">⊙</div>
+          <div class="sug-body">
+            <div class="sug-name">${esc(name)}</div>
+            <div class="sug-addr">${esc(addr)}</div>
+          </div>
+        </div>`
+      }).join('')
+      suggestions.classList.add('open')
+      attachSuggestionClicks(loc => selectLocation(loc))
+    }
   }
 
   // ── Input events ───────────────────────────────────────────────────────────
@@ -849,14 +884,29 @@
     mapVisible:   document.getElementById('map-visible'),
     spdVisible:   document.getElementById('spd-visible'),
     limitVisible: document.getElementById('limit-visible'),
+    gmapsKey:     document.getElementById('gmaps-key-input'),
+    gmapsStatus:  document.getElementById('gmaps-key-status'),
   }
 
   function loadUIFromSettings() {
     const s = loadSettings()
-    settingsEls.mapVisible.checked    = s.minimap.visible
-    settingsEls.spdVisible.checked    = s.speed.visible
-    settingsEls.limitVisible.checked  = s.speed.showLimit
+    settingsEls.mapVisible.checked   = s.minimap.visible
+    settingsEls.spdVisible.checked   = s.speed.visible
+    settingsEls.limitVisible.checked = s.speed.showLimit
+    const savedKey = persistGet('g2maps_gmaps_key') || import.meta.env.VITE_GOOGLE_MAPS_KEY || ''
+    settingsEls.gmapsKey.value = savedKey
+    settingsEls.gmapsStatus.textContent = savedKey
+      ? '✓ Google routing & autocomplete active'
+      : 'Using OpenStreetMap (OSRM + Nominatim) — no key needed'
   }
+
+  // Live status feedback as user types the key
+  settingsEls.gmapsKey.addEventListener('input', () => {
+    const v = settingsEls.gmapsKey.value.trim()
+    settingsEls.gmapsStatus.textContent = v
+      ? '✓ Will activate on Save'
+      : 'Will use OpenStreetMap on Save'
+  })
 
   document.getElementById('reset-btn').addEventListener('click', () => {
     const d = DEFAULT_SETTINGS
@@ -872,6 +922,16 @@
     }
     saveSettings(s)
     await reloadSettings()
+
+    // Save Google Maps key (or clear it)
+    const newKey = settingsEls.gmapsKey.value.trim()
+    persistSet('g2maps_gmaps_key', newKey)
+    setGoogleMapsKey(newKey || null)
+    if (newKey) loadGoogleMapsJs(newKey)
+    settingsEls.gmapsStatus.textContent = newKey
+      ? '✓ Google routing & autocomplete active'
+      : 'Using OpenStreetMap (OSRM + Nominatim) — no key needed'
+
     const el = document.getElementById('settings-status')
     el.textContent = 'Saved — glasses updated'
     el.className = 'status active'

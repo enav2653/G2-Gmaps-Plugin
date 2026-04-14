@@ -9,7 +9,7 @@ import {
   ImageRawDataUpdate,
 } from '@evenrealities/even_hub_sdk'
 
-import { getRoute, RouteStep } from './maps'
+import { getRoute, RouteStep, setGoogleMapsKey } from './maps'
 import { formatClockTime } from './display'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
@@ -37,6 +37,12 @@ import {
 
 let bridge: Awaited<ReturnType<typeof waitForEvenAppBridge>>
 let settings: HudSettings = loadSettings()
+
+// Apply any saved Google Maps API key before the first route request
+;(function applyPersistedGoogleKey() {
+  const k = persistGet('g2maps_gmaps_key')
+  if (k) setGoogleMapsKey(k)
+})()
 
 let steps:       RouteStep[] = []
 let stepIdx      = 0
