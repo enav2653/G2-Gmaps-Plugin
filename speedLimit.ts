@@ -1,139 +1,142 @@
 // ─── speedLimit.ts ────────────────────────────────────────────────────────────
 //
-// Fetches the posted speed limit for the current GPS position using two
-// Roads API calls:
+// Fetches the posted speed limit using the Overpass API (OpenStreetMap data).
+// No API key required — queries the public Overpass endpoint.
 //
-//   1. nearestRoads  — snaps lat/lng to the closest road segment, returning
-//                      a place ID for that segment.
-//   2. speedLimits   — returns the posted limit for the given place ID.
+// Strategy:
+//   • Find all OSM ways with a maxspeed tag within 40 m of the GPS fix.
+//   • Score candidates by centre-distance + road-type priority.
+//   • Cache results by ≈ 111 m grid tile so we hit the API at most once
+//     per tile (roughly every 6 s at 60 mph) rather than every GPS tick.
 //
-// Results are cached by place ID so we only hit the API when the driver
-// moves onto a new road segment, not on every GPS tick.
-//
-// NOTE: The Speed Limits endpoint requires a Google Maps Asset Tracking
-// license. If your project lacks this license, the call will return a 403.
-// The service degrades gracefully — limitMph stays null and the badge hides.
+// maxspeed parsing:
+//   "30 mph"  →  30 mph
+//   "50"      →  50 km/h → 31 mph  (OSM default unit is km/h)
+//   "50 km/h" →  50 km/h → 31 mph
+//   "national" / "walk" / country-codes → null (badge hidden)
 
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY as string
-
-const ROADS_BASE = 'https://roads.googleapis.com/v1'
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
-// placeId → speed limit in mph (or null if unavailable)
+// Keyed by grid tile (~111 m resolution at equator)
 const limitCache = new Map<string, number | null>()
 
-// The place ID of the road segment we're currently on
-let currentPlaceId: string | null = null
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface NearestRoadsResponse {
-  snappedPoints?: Array<{
-    location:      { latitude: number; longitude: number }
-    originalIndex: number
-    placeId:       string
-  }>
+function tileKey(lat: number, lng: number): string {
+  return `${lat.toFixed(3)},${lng.toFixed(3)}`
 }
 
-interface SpeedLimitsResponse {
-  speedLimits?: Array<{
-    placeId:    string
-    speedLimit: number   // value in the units field below
-    units:      'MPH' | 'KPH'
-  }>
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R    = 6371000
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a    = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-// ─── API calls ────────────────────────────────────────────────────────────────
+// Lower index = prefer this road type when multiple candidates match
+const HIGHWAY_PRIO: Record<string, number> = {
+  motorway: 0, motorway_link: 0,
+  trunk: 1, trunk_link: 1,
+  primary: 2, primary_link: 2,
+  secondary: 3, secondary_link: 3,
+  tertiary: 4, tertiary_link: 4,
+  residential: 5, unclassified: 6, service: 7,
+}
 
-/**
- * Snap a single lat/lng to the nearest road segment and return its place ID.
- * Returns null if the API call fails or returns no points.
- */
-async function nearestRoadPlaceId(lat: number, lng: number): Promise<string | null> {
-  const url = new URL(`${ROADS_BASE}/nearestRoads`)
-  url.searchParams.set('points', `${lat},${lng}`)
-  url.searchParams.set('key', MAPS_KEY)
+/** Convert an OSM maxspeed tag value to mph.  Returns null for unparseable values. */
+function parseMaxspeed(val: string | undefined): number | null {
+  if (!val) return null
+  const v = val.trim()
 
-  const res = await fetch(url.toString())
+  // "30 mph" or "30mph"
+  const mph = v.match(/^(\d+(?:\.\d+)?)\s*mph$/i)
+  if (mph) return Math.round(parseFloat(mph[1]))
+
+  // Plain number, "50 km/h", or "50 kph" — OSM default unit is km/h
+  const kph = v.match(/^(\d+(?:\.\d+)?)(?:\s*(?:km\/h|kph))?$/i)
+  if (kph) return Math.round(parseFloat(kph[1]) * 0.621371)
+
+  return null  // "national", "walk", "none", "DE:urban", etc.
+}
+
+// ─── Overpass query ───────────────────────────────────────────────────────────
+
+async function queryNearestLimit(lat: number, lng: number): Promise<number | null> {
+  // Ask for all road ways with a maxspeed tag within 40 m, including centre point
+  const query =
+    `[out:json][timeout:6];` +
+    `way(around:40,${lat.toFixed(6)},${lng.toFixed(6)})[highway][maxspeed];` +
+    `out tags center;`
+
+  const ctrl  = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 6500)
+  let res: Response
+  try {
+    res = await fetch(OVERPASS_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    `data=${encodeURIComponent(query)}`,
+      signal:  ctrl.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+
   if (!res.ok) {
-    console.warn(`nearestRoads ${res.status}:`, await res.text())
+    console.warn(`Overpass API ${res.status}`)
     return null
   }
 
-  const data: NearestRoadsResponse = await res.json()
-  return data.snappedPoints?.[0]?.placeId ?? null
-}
+  const data: { elements?: any[] } = await res.json()
+  const elements = data.elements ?? []
+  if (elements.length === 0) return null
 
-/**
- * Fetch the posted speed limit for a road segment place ID.
- * Returns the limit in mph, or null if unavailable.
- */
-async function fetchSpeedLimit(placeId: string): Promise<number | null> {
-  const url = new URL(`${ROADS_BASE}/speedLimits`)
-  url.searchParams.set('placeId', placeId)
-  url.searchParams.set('key', MAPS_KEY)
+  // Score each candidate: prefer closest centre + higher road priority.
+  // 10 m penalty per priority level so a nearer minor road beats a distant major one.
+  let bestScore = Infinity
+  let bestLimit: number | null = null
 
-  const res = await fetch(url.toString())
+  for (const el of elements) {
+    if (!el.center || !el.tags?.maxspeed) continue
+    const limit = parseMaxspeed(el.tags.maxspeed)
+    if (limit === null) continue
 
-  if (res.status === 403) {
-    // Asset Tracking license not active on this project
-    console.warn('Speed Limits API requires an Asset Tracking license (403). Badge will be hidden.')
-    return null
+    const dist  = haversineM(lat, lng, el.center.lat, el.center.lon)
+    const prio  = HIGHWAY_PRIO[el.tags.highway as string] ?? 8
+    const score = dist + prio * 10
+
+    if (score < bestScore) { bestScore = score; bestLimit = limit }
   }
 
-  if (!res.ok) {
-    console.warn(`speedLimits ${res.status}:`, await res.text())
-    return null
-  }
-
-  const data: SpeedLimitsResponse = await res.json()
-  const entry = data.speedLimits?.[0]
-  if (!entry) return null
-
-  // Normalise to mph regardless of what the API returns
-  return entry.units === 'KPH'
-    ? Math.round(entry.speedLimit * 0.621371)
-    : Math.round(entry.speedLimit)
+  return bestLimit
 }
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
 /**
- * Returns the posted speed limit in mph for the current GPS position.
- *
- * Workflow:
- *   1. Snap position to nearest road → get place ID
- *   2. If place ID unchanged from last call → return cached value (no API call)
- *   3. If place ID is new → fetch speed limit, cache it, return it
- *
- * Always resolves — returns null on any error or missing data so the
- * caller can safely hide the badge without crashing.
+ * Returns the posted speed limit in mph for the given GPS position, or null
+ * if no speed limit data is available nearby.  Always resolves — never throws.
  */
 export async function getSpeedLimitMph(lat: number, lng: number): Promise<number | null> {
+  const key = tileKey(lat, lng)
+  if (limitCache.has(key)) return limitCache.get(key) ?? null
+
   try {
-    const placeId = await nearestRoadPlaceId(lat, lng)
-    if (!placeId) return null
-
-    currentPlaceId = placeId
-
-    if (limitCache.has(placeId)) return limitCache.get(placeId) ?? null
-
-    const limit = await fetchSpeedLimit(placeId)
-    limitCache.set(placeId, limit)
+    const limit = await queryNearestLimit(lat, lng)
+    limitCache.set(key, limit)
     return limit
-
   } catch (err) {
     console.warn('Speed limit lookup failed:', err)
     return null
   }
 }
 
-/**
- * Clear the place ID cache — call this when starting a new route so
- * stale segment data doesn't bleed across trips.
- */
+/** Clear the cache — call when starting a new route. */
 export function resetSpeedLimitCache(): void {
   limitCache.clear()
-  currentPlaceId = null
 }
