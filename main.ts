@@ -1019,8 +1019,7 @@ export async function menuEndNavigation() {
 }
 
 /** Go to passive mode and clear the route so the minimap doesn't show a stale line. */
-export async function menuGoPassive() {
-  if (navState === 'passive') return
+export async function menuGoPassive() {  if (navState === 'passive') return
   navState = 'passive'
   steps   = []
   stepIdx = 0
@@ -1034,6 +1033,12 @@ export async function menuGoPassive() {
 /** Returns raw device compass heading (degrees, 0 = north, CW) or null if unavailable. */
 export function getDeviceHeading(): number | null {
   return deviceHeadingDeg
+}
+
+/** Returns the current GPS position, or null if no fix yet. */
+export function getCurrentLocation(): { lat: number; lng: number } | null {
+  if (!currentLat && !currentLng) return null
+  return { lat: currentLat, lng: currentLng }
 }
 
 /** Manual north calibration: call when phone is physically pointing north.

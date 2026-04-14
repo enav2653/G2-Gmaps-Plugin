@@ -85,8 +85,15 @@
 
     /* ── Favorites ── */
     .fav-section { margin-top: 16px; border-top: 0.5px solid var(--border); }
-    .fav-header { padding: 12px 16px 4px; font-size: 10px; text-transform: uppercase;
+    .fav-header-row { display: flex; align-items: center; justify-content: space-between;
+                      padding: 12px 16px 4px; }
+    .fav-header { font-size: 10px; text-transform: uppercase;
                   letter-spacing: 0.08em; color: var(--muted); }
+    .fav-save-here-btn { background: none; border: 0.5px solid var(--amber); border-radius: 8px;
+                         color: var(--amber); font-size: 11px; padding: 4px 10px; cursor: pointer;
+                         transition: background 0.1s; }
+    .fav-save-here-btn:active { background: rgba(200,144,80,0.12); }
+    .fav-empty { padding: 12px 16px; font-size: 13px; color: var(--muted); }
     .fav-item { display: flex; align-items: center; gap: 12px; padding: 11px 16px;
                 border-bottom: 0.5px solid var(--border); cursor: pointer;
                 transition: background 0.1s; }
@@ -97,8 +104,25 @@
     .fav-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .fav-addr { font-size: 11px; color: var(--muted); margin-top: 2px;
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fav-rename { background: none; border: none; color: var(--muted); font-size: 15px;
+                  line-height: 1; padding: 4px 4px; cursor: pointer; flex-shrink: 0; }
     .fav-remove { background: none; border: none; color: var(--muted); font-size: 20px;
                   line-height: 1; padding: 4px 2px; cursor: pointer; flex-shrink: 0; }
+
+    /* ── Favorite name modal ── */
+    .fav-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+                 display: none; align-items: center; justify-content: center; z-index: 150; }
+    .fav-modal.open { display: flex; }
+    .fav-modal-card { background: var(--surface); border: 0.5px solid var(--border);
+                      border-radius: 16px; padding: 20px; width: calc(100% - 40px);
+                      max-width: 320px; display: flex; flex-direction: column; gap: 12px; }
+    .fav-modal-title { font-size: 15px; font-weight: 600; }
+    .fav-modal-input { background: var(--bg); border: 0.5px solid var(--border); border-radius: 10px;
+                       color: var(--text); font-size: 15px; padding: 10px 12px; outline: none;
+                       transition: border-color 0.15s; width: 100%; }
+    .fav-modal-input:focus { border-color: var(--accent); }
+    .fav-modal-addr { font-size: 12px; color: var(--muted); }
+    .fav-modal-btns { display: flex; gap: 8px; }
 
     /* ── Status bar ── */
     .status { padding: 12px 16px; font-size: 12px; color: var(--muted);
@@ -225,9 +249,13 @@
     <button class="nav-ctrl-btn nav-ctrl-pause" id="nav-pause-btn">Pause Navigation</button>
     <button class="nav-ctrl-btn nav-ctrl-end"   id="nav-end-btn">End Navigation</button>
   </div>
-  <div class="fav-section" id="fav-section" style="display:none">
-    <div class="fav-header">Favorites</div>
+  <div class="fav-section" id="fav-section">
+    <div class="fav-header-row">
+      <div class="fav-header">Favorites</div>
+      <button class="fav-save-here-btn" id="fav-save-here-btn">+ Save here</button>
+    </div>
     <div id="fav-list"></div>
+    <div class="fav-empty" id="fav-empty">No favorites saved</div>
   </div>
   <div class="status" id="status">Enter a destination to begin</div>
 </div>
@@ -433,9 +461,23 @@
   </div>
 </div>
 
+<!-- ── Favorite name/rename modal ── -->
+<div class="fav-modal" id="fav-modal">
+  <div class="fav-modal-card">
+    <div class="fav-modal-title">Save Favorite</div>
+    <input class="fav-modal-input" id="fav-modal-input" type="text" placeholder="Name this location"
+           autocomplete="off" autocorrect="off" spellcheck="false"/>
+    <div class="fav-modal-addr" id="fav-modal-addr"></div>
+    <div class="fav-modal-btns">
+      <button class="action-btn" id="fav-modal-cancel" style="flex:1">Cancel</button>
+      <button class="action-btn primary" id="fav-modal-save" style="flex:1">Save</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
   import { geocode }           from './maps.ts'
-  import { startNavigation, menuPauseResume, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState } from './main.ts'
+  import { startNavigation, menuPauseResume, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState, getCurrentLocation } from './main.ts'
   import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './settings.ts'
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
@@ -539,27 +581,74 @@
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
   }
 
+  // ── Favorite name modal ────────────────────────────────────────────────────
+  const favModal       = document.getElementById('fav-modal')
+  const favModalInput  = document.getElementById('fav-modal-input')
+  const favModalAddr   = document.getElementById('fav-modal-addr')
+  const favModalSave   = document.getElementById('fav-modal-save')
+  const favModalCancel = document.getElementById('fav-modal-cancel')
+  let pendingFavLoc = null   // loc being saved/renamed
+  let pendingFavIdx = null   // index of existing fav being renamed, or null for new
+
+  function openFavModal(loc, defaultName, existingIdx = null) {
+    pendingFavLoc = loc
+    pendingFavIdx = existingIdx
+    favModalInput.value = defaultName || loc.name || loc.label || ''
+    favModalAddr.textContent = loc.label && loc.label !== defaultName ? loc.label : ''
+    favModal.classList.add('open')
+    setTimeout(() => { favModalInput.focus(); favModalInput.select() }, 50)
+  }
+
+  favModalSave.addEventListener('click', () => {
+    if (!pendingFavLoc) return
+    const name = favModalInput.value.trim() || pendingFavLoc.label || pendingFavLoc.name || 'Favorite'
+    const favs = loadFavorites()
+    if (pendingFavIdx !== null) {
+      favs[pendingFavIdx].name = name
+    } else {
+      favs.push({ name, label: pendingFavLoc.label || '', lat: pendingFavLoc.lat, lng: pendingFavLoc.lng })
+    }
+    storeFavorites(favs)
+    renderFavorites()
+    favModal.classList.remove('open')
+    pendingFavLoc = null; pendingFavIdx = null
+    if (pendingFavIdx === null) saveFavRow.style.display = 'none'
+  })
+  favModalCancel.addEventListener('click', () => {
+    favModal.classList.remove('open')
+    pendingFavLoc = null; pendingFavIdx = null
+  })
+  favModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') favModalSave.click() })
+
   // ── Favorites rendering ────────────────────────────────────────────────────
   function renderFavorites() {
-    const favs = loadFavorites()
-    const section = document.getElementById('fav-section')
-    const list    = document.getElementById('fav-list')
-    if (!favs.length) { section.style.display = 'none'; return }
-    section.style.display = ''
+    const favs  = loadFavorites()
+    const list  = document.getElementById('fav-list')
+    const empty = document.getElementById('fav-empty')
+    empty.style.display = favs.length ? 'none' : ''
     list.innerHTML = favs.map((f, i) => `
       <div class="fav-item" data-idx="${i}">
         <div class="fav-icon">★</div>
         <div class="fav-text">
           <div class="fav-name">${esc(f.name || f.label)}</div>
-          ${f.label !== (f.name || '') ? `<div class="fav-addr">${esc(f.label)}</div>` : ''}
+          ${f.label && f.label !== (f.name || '') ? `<div class="fav-addr">${esc(f.label)}</div>` : ''}
         </div>
+        <button class="fav-rename" data-idx="${i}" title="Rename">✎</button>
         <button class="fav-remove" data-idx="${i}" title="Remove">×</button>
       </div>`).join('')
     list.querySelectorAll('.fav-item').forEach(el => {
       el.addEventListener('click', e => {
-        if (e.target.closest('.fav-remove')) return
+        if (e.target.closest('.fav-remove') || e.target.closest('.fav-rename')) return
         const f = favs[parseInt(el.dataset.idx)]
         selectLocation({ lat: f.lat, lng: f.lng, name: f.name || f.label, label: f.label })
+      })
+    })
+    list.querySelectorAll('.fav-rename').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        const idx = parseInt(btn.dataset.idx)
+        const f   = favs[idx]
+        openFavModal({ lat: f.lat, lng: f.lng, label: f.label, name: f.name }, f.name || f.label, idx)
       })
     })
     list.querySelectorAll('.fav-remove').forEach(btn => {
@@ -681,15 +770,25 @@
   // ── Save to favorites ──────────────────────────────────────────────────────
   saveFavBtn.addEventListener('click', () => {
     if (!selectedLocation) return
-    const favs = loadFavorites()
-    if (!favs.some(f => f.label === selectedLocation.label)) {
-      favs.push({ name: selectedLocation.name || selectedLocation.label,
-                  label: selectedLocation.label,
-                  lat: selectedLocation.lat, lng: selectedLocation.lng })
-      storeFavorites(favs)
-      renderFavorites()
-    }
-    saveFavRow.style.display = 'none'
+    openFavModal(selectedLocation, selectedLocation.name || selectedLocation.label)
+  })
+
+  // ── Save current GPS location as favorite ─────────────────────────────────
+  document.getElementById('fav-save-here-btn').addEventListener('click', async () => {
+    const pos = getCurrentLocation()
+    if (!pos) { setStatus('No GPS fix yet', 'warn'); return }
+    let label = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`
+    let name  = label
+    try {
+      const geocoder = new google.maps.Geocoder()
+      const res = await new Promise((ok, fail) =>
+        geocoder.geocode({ location: pos }, (r, s) => s === 'OK' ? ok(r) : fail(s)))
+      if (res[0]) {
+        label = res[0].formatted_address
+        name  = res[0].address_components?.[0]?.short_name || label
+      }
+    } catch { /* no reverse geocode — use coords */ }
+    openFavModal({ lat: pos.lat, lng: pos.lng, label, name }, name)
   })
 
   // ── Navigate ───────────────────────────────────────────────────────────────
