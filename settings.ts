@@ -1,18 +1,16 @@
 export interface HudSettings {
   minimap: {
-    visible:    boolean
-    brightness: number  // 20–100
+    visible: boolean
   }
   speed: {
-    visible:    boolean
-    brightness: number  // 20–100
-    showLimit:  boolean
+    visible:   boolean
+    showLimit: boolean
   }
 }
 
 export const DEFAULT_SETTINGS: HudSettings = {
-  minimap: { visible: true,  brightness: 100 },
-  speed:   { visible: true,  brightness: 100, showLimit: true },
+  minimap: { visible: true },
+  speed:   { visible: true, showLimit: true },
 }
 
 // ── Persistent storage: localStorage + cookie fallback ────────────────────────

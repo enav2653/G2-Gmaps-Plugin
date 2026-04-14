@@ -85,8 +85,15 @@
 
     /* ── Favorites ── */
     .fav-section { margin-top: 16px; border-top: 0.5px solid var(--border); }
-    .fav-header { padding: 12px 16px 4px; font-size: 10px; text-transform: uppercase;
+    .fav-header-row { display: flex; align-items: center; justify-content: space-between;
+                      padding: 12px 16px 4px; }
+    .fav-header { font-size: 10px; text-transform: uppercase;
                   letter-spacing: 0.08em; color: var(--muted); }
+    .fav-save-here-btn { background: none; border: 0.5px solid var(--amber); border-radius: 8px;
+                         color: var(--amber); font-size: 11px; padding: 4px 10px; cursor: pointer;
+                         transition: background 0.1s; }
+    .fav-save-here-btn:active { background: rgba(200,144,80,0.12); }
+    .fav-empty { padding: 12px 16px; font-size: 13px; color: var(--muted); }
     .fav-item { display: flex; align-items: center; gap: 12px; padding: 11px 16px;
                 border-bottom: 0.5px solid var(--border); cursor: pointer;
                 transition: background 0.1s; }
@@ -97,8 +104,36 @@
     .fav-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .fav-addr { font-size: 11px; color: var(--muted); margin-top: 2px;
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fav-rename { background: none; border: none; color: var(--muted); font-size: 15px;
+                  line-height: 1; padding: 4px 4px; cursor: pointer; flex-shrink: 0; }
     .fav-remove { background: none; border: none; color: var(--muted); font-size: 20px;
                   line-height: 1; padding: 4px 2px; cursor: pointer; flex-shrink: 0; }
+    .fav-reorder { background: none; border: none; color: var(--muted); font-size: 16px;
+                   line-height: 1; padding: 4px 3px; cursor: pointer; flex-shrink: 0; }
+    .fav-reorder:disabled { opacity: 0.2; cursor: default; }
+
+    /* ── Favorites sort bar ── */
+    .fav-sort-row { display: flex; gap: 6px; padding: 0 16px 10px; }
+    .fav-sort-btn { flex: 1; padding: 5px 0; background: none;
+                    border: 0.5px solid var(--border); border-radius: 8px;
+                    color: var(--muted); font-size: 11px; cursor: pointer; transition: all 0.1s; }
+    .fav-sort-btn.active { border-color: var(--accent); color: var(--accent);
+                           background: rgba(55,138,221,0.08); }
+
+    /* ── Favorite name modal ── */
+    .fav-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+                 display: none; align-items: center; justify-content: center; z-index: 150; }
+    .fav-modal.open { display: flex; }
+    .fav-modal-card { background: var(--surface); border: 0.5px solid var(--border);
+                      border-radius: 16px; padding: 20px; width: calc(100% - 40px);
+                      max-width: 320px; display: flex; flex-direction: column; gap: 12px; }
+    .fav-modal-title { font-size: 15px; font-weight: 600; }
+    .fav-modal-input { background: var(--bg); border: 0.5px solid var(--border); border-radius: 10px;
+                       color: var(--text); font-size: 15px; padding: 10px 12px; outline: none;
+                       transition: border-color 0.15s; width: 100%; }
+    .fav-modal-input:focus { border-color: var(--accent); }
+    .fav-modal-addr { font-size: 12px; color: var(--muted); }
+    .fav-modal-btns { display: flex; gap: 8px; }
 
     /* ── Status bar ── */
     .status { padding: 12px 16px; font-size: 12px; color: var(--muted);
@@ -202,7 +237,7 @@
 <!-- ── Tab bar ── -->
 <div class="tabs">
   <div class="tab active" data-tab="nav">Navigate</div>
-  <div class="tab" data-tab="settings">HUD settings</div>
+  <div class="tab" data-tab="settings">Settings</div>
   <div class="tab" data-tab="preview">Preview</div>
 </div>
 
@@ -225,16 +260,25 @@
     <button class="nav-ctrl-btn nav-ctrl-pause" id="nav-pause-btn">Pause Navigation</button>
     <button class="nav-ctrl-btn nav-ctrl-end"   id="nav-end-btn">End Navigation</button>
   </div>
-  <div class="fav-section" id="fav-section" style="display:none">
-    <div class="fav-header">Favorites</div>
+  <div class="fav-section" id="fav-section">
+    <div class="fav-header-row">
+      <div class="fav-header">Favorites</div>
+      <button class="fav-save-here-btn" id="fav-save-here-btn">+ Save here</button>
+    </div>
+    <div class="fav-sort-row" id="fav-sort-row" style="display:none">
+      <button class="fav-sort-btn" data-sort="custom">Custom</button>
+      <button class="fav-sort-btn" data-sort="name">Name</button>
+      <button class="fav-sort-btn" data-sort="distance">Distance</button>
+    </div>
     <div id="fav-list"></div>
+    <div class="fav-empty" id="fav-empty">No favorites saved</div>
   </div>
   <div class="status" id="status">Enter a destination to begin</div>
 </div>
 
 
 <!-- ══════════════════════════════════════════
-     TAB 3 — HUD Settings
+     TAB 3 — Settings
      ══════════════════════════════════════════ -->
 <div class="panel" id="panel-settings">
 
@@ -254,22 +298,6 @@
 
   <div class="settings-section">Minimap</div>
 
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Size</span>
-      <span class="setting-val" id="map-size-val">100%</span>
-    </div>
-    <input type="range" id="map-size" min="50" max="150" step="1" value="100">
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Brightness</span>
-      <span class="setting-val" id="map-bright-val">100%</span>
-    </div>
-    <input type="range" id="map-bright" min="20" max="100" step="1" value="100">
-  </div>
-
   <div class="toggle-row">
     <div class="toggle-info">
       <div class="toggle-label">Show minimap</div>
@@ -283,22 +311,6 @@
   </div>
 
   <div class="settings-section">Speed readout</div>
-
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Size</span>
-      <span class="setting-val" id="spd-size-val">100%</span>
-    </div>
-    <input type="range" id="spd-size" min="50" max="150" step="1" value="100">
-  </div>
-
-  <div class="setting-row">
-    <div class="setting-head">
-      <span class="setting-label">Brightness</span>
-      <span class="setting-val" id="spd-bright-val">100%</span>
-    </div>
-    <input type="range" id="spd-bright" min="20" max="100" step="1" value="100">
-  </div>
 
   <div class="toggle-row">
     <div class="toggle-info">
@@ -322,33 +334,6 @@
       <div class="toggle-bg"></div>
       <div class="toggle-thumb"></div>
     </label>
-  </div>
-
-  <!-- Live preview -->
-  <div class="preview-wrap">
-    <div class="preview-label">Live preview</div>
-    <div class="preview-screen">
-      <div class="p-minimap" id="p-minimap">
-        <svg viewBox="0 0 68 88" xmlns="http://www.w3.org/2000/svg">
-          <rect width="68" height="88" fill="#12121e"/>
-          <rect x="0" y="42" width="68" height="5" fill="#2a2a3e"/>
-          <rect x="30" y="0" width="5" height="88" fill="#2a2a3e"/>
-          <line x1="0" y1="18" x2="32" y2="44" stroke="#2a2a3e" stroke-width="3"/>
-          <rect x="2" y="2" width="25" height="37" rx="1" fill="#1a1a2e"/>
-          <rect x="38" y="2" width="28" height="37" rx="1" fill="#1a1a2e"/>
-          <rect x="38" y="50" width="28" height="35" rx="1" fill="#1a1a2e"/>
-          <rect x="2" y="50" width="25" height="35" rx="1" fill="#1a1a2e"/>
-          <polygon points="34,32 29,44 39,44" fill="#378ADD" opacity="0.5"/>
-          <circle cx="34" cy="44" r="4" fill="#378ADD" opacity="0.9"/>
-          <text x="62" y="10" font-size="7" fill="#444460" text-anchor="end" font-family="sans-serif">N</text>
-        </svg>
-      </div>
-      <div class="p-speed" id="p-speed">
-        <div class="p-speed-num" id="p-speed-num" style="font-size:18px">28</div>
-        <div class="p-speed-unit" id="p-speed-unit" style="font-size:8px">mph</div>
-        <div class="p-speed-limit" id="p-speed-limit" style="font-size:8px;padding:1px 5px">35</div>
-      </div>
-    </div>
   </div>
 
   <div class="settings-section">Compass</div>
@@ -433,9 +418,23 @@
   </div>
 </div>
 
+<!-- ── Favorite name/rename modal ── -->
+<div class="fav-modal" id="fav-modal">
+  <div class="fav-modal-card">
+    <div class="fav-modal-title">Save Favorite</div>
+    <input class="fav-modal-input" id="fav-modal-input" type="text" placeholder="Name this location"
+           autocomplete="off" autocorrect="off" spellcheck="false"/>
+    <div class="fav-modal-addr" id="fav-modal-addr"></div>
+    <div class="fav-modal-btns">
+      <button class="action-btn" id="fav-modal-cancel" style="flex:1">Cancel</button>
+      <button class="action-btn primary" id="fav-modal-save" style="flex:1">Save</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
   import { geocode }           from './maps.ts'
-  import { startNavigation, menuPauseResume, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState } from './main.ts'
+  import { startNavigation, menuPauseResume, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState, getCurrentLocation } from './main.ts'
   import { saveSettings, loadSettings, DEFAULT_SETTINGS } from './settings.ts'
 
   const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY
@@ -539,33 +538,134 @@
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
   }
 
+  // ── Favorite name modal ────────────────────────────────────────────────────
+  const favModal       = document.getElementById('fav-modal')
+  const favModalInput  = document.getElementById('fav-modal-input')
+  const favModalAddr   = document.getElementById('fav-modal-addr')
+  const favModalSave   = document.getElementById('fav-modal-save')
+  const favModalCancel = document.getElementById('fav-modal-cancel')
+  let pendingFavLoc = null   // loc being saved/renamed
+  let pendingFavIdx = null   // index of existing fav being renamed, or null for new
+
+  function openFavModal(loc, defaultName, existingIdx = null) {
+    pendingFavLoc = loc
+    pendingFavIdx = existingIdx
+    favModalInput.value = defaultName || loc.name || loc.label || ''
+    favModalAddr.textContent = loc.label && loc.label !== defaultName ? loc.label : ''
+    favModal.classList.add('open')
+    setTimeout(() => { favModalInput.focus(); favModalInput.select() }, 50)
+  }
+
+  favModalSave.addEventListener('click', () => {
+    if (!pendingFavLoc) return
+    const name = favModalInput.value.trim() || pendingFavLoc.label || pendingFavLoc.name || 'Favorite'
+    const favs = loadFavorites()
+    if (pendingFavIdx !== null) {
+      favs[pendingFavIdx].name = name
+    } else {
+      favs.push({ name, label: pendingFavLoc.label || '', lat: pendingFavLoc.lat, lng: pendingFavLoc.lng })
+    }
+    storeFavorites(favs)
+    renderFavorites()
+    favModal.classList.remove('open')
+    pendingFavLoc = null; pendingFavIdx = null
+    if (pendingFavIdx === null) saveFavRow.style.display = 'none'
+  })
+  favModalCancel.addEventListener('click', () => {
+    favModal.classList.remove('open')
+    pendingFavLoc = null; pendingFavIdx = null
+  })
+  favModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') favModalSave.click() })
+
+  // ── Favorites sort ─────────────────────────────────────────────────────────
+  let favSortMode = persistGet('g2maps_fav_sort') || 'custom'
+
+  function distMi(lat1, lng1, lat2, lng2) {
+    const R = 3958.8, dLat = (lat2-lat1)*Math.PI/180, dLng = (lng2-lng1)*Math.PI/180
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2
+    return R * 2 * Math.asin(Math.sqrt(a))
+  }
+
+  document.querySelectorAll('.fav-sort-btn').forEach(btn => {
+    if (btn.dataset.sort === favSortMode) btn.classList.add('active')
+    btn.addEventListener('click', () => {
+      favSortMode = btn.dataset.sort
+      persistSet('g2maps_fav_sort', favSortMode)
+      document.querySelectorAll('.fav-sort-btn').forEach(b => b.classList.toggle('active', b === btn))
+      renderFavorites()
+    })
+  })
+
   // ── Favorites rendering ────────────────────────────────────────────────────
   function renderFavorites() {
-    const favs = loadFavorites()
-    const section = document.getElementById('fav-section')
+    const favs    = loadFavorites()
     const list    = document.getElementById('fav-list')
-    if (!favs.length) { section.style.display = 'none'; return }
-    section.style.display = ''
-    list.innerHTML = favs.map((f, i) => `
-      <div class="fav-item" data-idx="${i}">
-        <div class="fav-icon">★</div>
-        <div class="fav-text">
-          <div class="fav-name">${esc(f.name || f.label)}</div>
-          ${f.label !== (f.name || '') ? `<div class="fav-addr">${esc(f.label)}</div>` : ''}
-        </div>
-        <button class="fav-remove" data-idx="${i}" title="Remove">×</button>
-      </div>`).join('')
+    const empty   = document.getElementById('fav-empty')
+    const sortRow = document.getElementById('fav-sort-row')
+    empty.style.display   = favs.length ? 'none' : ''
+    sortRow.style.display = favs.length > 1 ? '' : 'none'
+
+    // Build sorted display order (array of original indices)
+    const pos = getCurrentLocation()
+    let order = favs.map((_, i) => i)
+    if (favSortMode === 'name') {
+      order.sort((a, b) => (favs[a].name || favs[a].label).localeCompare(favs[b].name || favs[b].label))
+    } else if (favSortMode === 'distance' && pos) {
+      order.sort((a, b) => distMi(pos.lat, pos.lng, favs[a].lat, favs[a].lng)
+                         - distMi(pos.lat, pos.lng, favs[b].lat, favs[b].lng))
+    }
+
+    list.innerHTML = order.map((fi, di) => {
+      const f = favs[fi]
+      const distTag = favSortMode === 'distance' && pos
+        ? ` <span style="font-size:11px;color:var(--muted)">${distMi(pos.lat,pos.lng,f.lat,f.lng) < 10 ? distMi(pos.lat,pos.lng,f.lat,f.lng).toFixed(1) : Math.round(distMi(pos.lat,pos.lng,f.lat,f.lng))} mi</span>`
+        : ''
+      const reorderBtns = favSortMode === 'custom' ? `
+        <button class="fav-reorder" data-fi="${fi}" data-dir="-1" title="Move up"   ${di === 0              ? 'disabled' : ''}>↑</button>
+        <button class="fav-reorder" data-fi="${fi}" data-dir="1"  title="Move down" ${di === favs.length-1  ? 'disabled' : ''}>↓</button>` : ''
+      return `
+        <div class="fav-item" data-fi="${fi}">
+          <div class="fav-icon">★</div>
+          <div class="fav-text">
+            <div class="fav-name">${esc(f.name || f.label)}${distTag}</div>
+            ${f.label && f.label !== (f.name||'') ? `<div class="fav-addr">${esc(f.label)}</div>` : ''}
+          </div>
+          ${reorderBtns}
+          <button class="fav-rename" data-fi="${fi}" title="Rename">✎</button>
+          <button class="fav-remove" data-fi="${fi}" title="Remove">×</button>
+        </div>`
+    }).join('')
+
     list.querySelectorAll('.fav-item').forEach(el => {
       el.addEventListener('click', e => {
-        if (e.target.closest('.fav-remove')) return
-        const f = favs[parseInt(el.dataset.idx)]
+        if (e.target.closest('.fav-remove,.fav-rename,.fav-reorder')) return
+        const f = favs[parseInt(el.dataset.fi)]
         selectLocation({ lat: f.lat, lng: f.lng, name: f.name || f.label, label: f.label })
+      })
+    })
+    list.querySelectorAll('.fav-rename').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        const fi = parseInt(btn.dataset.fi), f = favs[fi]
+        openFavModal({ lat: f.lat, lng: f.lng, label: f.label, name: f.name }, f.name || f.label, fi)
       })
     })
     list.querySelectorAll('.fav-remove').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation()
-        storeFavorites(favs.filter((_, i) => i !== parseInt(btn.dataset.idx)))
+        storeFavorites(favs.filter((_, i) => i !== parseInt(btn.dataset.fi)))
+        renderFavorites()
+      })
+    })
+    list.querySelectorAll('.fav-reorder').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        const fi = parseInt(btn.dataset.fi), dir = parseInt(btn.dataset.dir)
+        const di = order.indexOf(fi), targetFi = order[di + dir]
+        if (targetFi === undefined) return
+        const updated = [...favs];
+        [updated[fi], updated[targetFi]] = [updated[targetFi], updated[fi]]
+        storeFavorites(updated)
         renderFavorites()
       })
     })
@@ -681,15 +781,15 @@
   // ── Save to favorites ──────────────────────────────────────────────────────
   saveFavBtn.addEventListener('click', () => {
     if (!selectedLocation) return
-    const favs = loadFavorites()
-    if (!favs.some(f => f.label === selectedLocation.label)) {
-      favs.push({ name: selectedLocation.name || selectedLocation.label,
-                  label: selectedLocation.label,
-                  lat: selectedLocation.lat, lng: selectedLocation.lng })
-      storeFavorites(favs)
-      renderFavorites()
-    }
-    saveFavRow.style.display = 'none'
+    openFavModal(selectedLocation, selectedLocation.name || selectedLocation.label)
+  })
+
+  // ── Save current GPS location as favorite ─────────────────────────────────
+  document.getElementById('fav-save-here-btn').addEventListener('click', () => {
+    const pos = getCurrentLocation()
+    if (!pos) { setStatus('No GPS fix yet', 'warn'); return }
+    const label = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`
+    openFavModal({ lat: pos.lat, lng: pos.lng, label, name: label }, label)
   })
 
   // ── Navigate ───────────────────────────────────────────────────────────────
@@ -746,92 +846,29 @@
 
   // ── Settings tab ───────────────────────────────────────────────────────────
   const settingsEls = {
-    mapSize:      document.getElementById('map-size'),
-    mapBright:    document.getElementById('map-bright'),
     mapVisible:   document.getElementById('map-visible'),
-    spdSize:      document.getElementById('spd-size'),
-    spdBright:    document.getElementById('spd-bright'),
     spdVisible:   document.getElementById('spd-visible'),
     limitVisible: document.getElementById('limit-visible'),
   }
 
   function loadUIFromSettings() {
     const s = loadSettings()
-    settingsEls.mapSize.value      = s.minimap.size
-    settingsEls.mapBright.value    = s.minimap.brightness
-    settingsEls.mapVisible.checked = s.minimap.visible
-    settingsEls.spdSize.value      = s.speed.size
-    settingsEls.spdBright.value    = s.speed.brightness
-    settingsEls.spdVisible.checked = s.speed.visible
-    settingsEls.limitVisible.checked = s.speed.showLimit
-    updatePreview()
+    settingsEls.mapVisible.checked    = s.minimap.visible
+    settingsEls.spdVisible.checked    = s.speed.visible
+    settingsEls.limitVisible.checked  = s.speed.showLimit
   }
-
-  function updatePreview() {
-    const ms = parseInt(settingsEls.mapSize.value)
-    const mb = parseInt(settingsEls.mapBright.value)
-    const mv = settingsEls.mapVisible.checked
-    const ss = parseInt(settingsEls.spdSize.value)
-    const sb = parseInt(settingsEls.spdBright.value)
-    const sv = settingsEls.spdVisible.checked
-    const lv = settingsEls.limitVisible.checked
-
-    document.getElementById('map-size-val').textContent   = ms + '%'
-    document.getElementById('map-bright-val').textContent = mb + '%'
-    document.getElementById('spd-size-val').textContent   = ss + '%'
-    document.getElementById('spd-bright-val').textContent = sb + '%'
-
-    const scr   = document.querySelector('.preview-screen')
-    const scrH  = scr.offsetHeight || 110
-    const mapWpx = (80 * ms / 100) / (88 * ms / 100) * (88 * ms / 100 / 288 * scrH)
-    const mapHpx = (88 * ms / 100) / 288 * scrH
-
-    const pm = document.getElementById('p-minimap')
-    pm.style.width   = Math.max(12, mapWpx) + 'px'
-    pm.style.height  = Math.max(12, mapHpx) + 'px'
-    pm.style.opacity = mv ? (mb / 100) : 0
-
-    const ps = document.getElementById('p-speed')
-    ps.style.opacity = sv ? (sb / 100) : 0
-
-    const numPx  = Math.max(8, (scrH / 288) * 22 * ss / 100)
-    const unitPx = Math.max(6, (scrH / 288) * 9  * ss / 100)
-    const limPx  = Math.max(6, (scrH / 288) * 8  * ss / 100)
-
-    document.getElementById('p-speed-num').style.fontSize   = numPx  + 'px'
-    document.getElementById('p-speed-unit').style.fontSize  = unitPx + 'px'
-    document.getElementById('p-speed-limit').style.fontSize = limPx  + 'px'
-    document.getElementById('p-speed-limit').style.padding  = `${limPx*0.15}px ${limPx*0.6}px`
-    document.getElementById('p-speed-limit').style.display  = lv ? '' : 'none'
-  }
-
-  Object.values(settingsEls).forEach(el => el.addEventListener('input', updatePreview))
 
   document.getElementById('reset-btn').addEventListener('click', () => {
     const d = DEFAULT_SETTINGS
-    settingsEls.mapSize.value        = d.minimap.size
-    settingsEls.mapBright.value      = d.minimap.brightness
     settingsEls.mapVisible.checked   = d.minimap.visible
-    settingsEls.spdSize.value        = d.speed.size
-    settingsEls.spdBright.value      = d.speed.brightness
     settingsEls.spdVisible.checked   = d.speed.visible
     settingsEls.limitVisible.checked = d.speed.showLimit
-    updatePreview()
   })
 
   document.getElementById('save-btn').addEventListener('click', async () => {
     const s = {
-      minimap: {
-        size:       parseInt(settingsEls.mapSize.value),
-        brightness: parseInt(settingsEls.mapBright.value),
-        visible:    settingsEls.mapVisible.checked,
-      },
-      speed: {
-        size:       parseInt(settingsEls.spdSize.value),
-        brightness: parseInt(settingsEls.spdBright.value),
-        visible:    settingsEls.spdVisible.checked,
-        showLimit:  settingsEls.limitVisible.checked,
-      },
+      minimap: { visible: settingsEls.mapVisible.checked },
+      speed:   { visible: settingsEls.spdVisible.checked, showLimit: settingsEls.limitVisible.checked },
     }
     saveSettings(s)
     await reloadSettings()
@@ -894,11 +931,12 @@
 
   ;(function () {
     const HUD_W = 576, HUD_H = 288
-    const BANNER_H  = 64
+    const BANNER_H  = 80
     const BOTTOM_Y  = 196
     const MINIMAP_Y = 164, MINIMAP_W = 124, MINIMAP_H = 124
     const SPEED_X   = 512, SPEED_W = 56
-    const MEDIA_X   = 130
+    const CLOCK_X   = 476, CLOCK_W = 100
+    const MEDIA_X   = 152
 
     // Phosphor-green palette matching the G2 waveguide display
     const G_BRIGHT = '#00e87a'   // main text
@@ -1013,7 +1051,7 @@
       // ── Banner ───────────────────────────────────────────────────────────────
       if (s.bannerVisible && s.bannerText) {
         ctx.fillStyle = 'rgba(0,18,8,0.35)'
-        ctx.fillRect(0, 0, HUD_W, BANNER_H)
+        ctx.fillRect(0, 0, CLOCK_X, BANNER_H)
         ctx.textAlign = 'left'
         const lines = s.bannerText.split('\n')
         lines.forEach((line, i) => {
@@ -1021,8 +1059,24 @@
             ? "bold 17px 'Courier New', Courier, monospace"
             : "13px 'Courier New', Courier, monospace"
           ctx.fillStyle = i === 0 ? G_BRIGHT : G_DIM
-          ctx.fillText(line, 6, 22 + i * 21, HUD_W - 12)
+          ctx.fillText(line, 6, 22 + i * 21, CLOCK_X - 12)
         })
+      }
+
+      // ── Clock ────────────────────────────────────────────────────────────────
+      {
+        const now  = new Date()
+        const h    = now.getHours(), m = now.getMinutes()
+        const ampm = h >= 12 ? 'PM' : 'AM'
+        const h12  = h % 12 || 12
+        const txt  = `${h12}:${String(m).padStart(2,'0')} ${ampm}`
+        ctx.fillStyle = 'rgba(0,18,8,0.35)'
+        ctx.fillRect(CLOCK_X, 0, CLOCK_W, 40)
+        ctx.font      = "11px 'Courier New', Courier, monospace"
+        ctx.fillStyle = G_DIM
+        ctx.textAlign = 'right'
+        ctx.fillText(txt, CLOCK_X + CLOCK_W - 4, 18)
+        ctx.textAlign = 'left'
       }
 
       // ── Minimap image (green-tinted via canvas filter) ────────────────────────

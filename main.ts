@@ -10,6 +10,7 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { getRoute, RouteStep } from './maps'
+import { formatClockTime } from './display'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import { renderMinimapBmp, renderCalibrationBmp } from './mapImage'
@@ -20,6 +21,7 @@ import {
   buildMinimapImageContainers,
   MAP_TILE_CIDS,
   buildSpeedContainer,
+  buildTimeContainer,
   buildBannerText,
   buildSpeedText,
   buildMediaText,
@@ -62,6 +64,7 @@ type LocationFix = {
   mediaPlaying?: boolean
 }
 let activeLocationProvider: (() => Promise<LocationFix | null>) | null = null
+let locationProviderFailures = 0   // consecutive null returns from activeLocationProvider
 let androidPollTimer: ReturnType<typeof setInterval> | null = null
 let bridgeScanned = false   // suppress repeated diagnostic logs during retry polls
 
@@ -173,7 +176,7 @@ async function tryBridgeLocation(): Promise<LocationFix | null> {
   const GPS_BRIDGE_URL = 'http://127.0.0.1:7272/location'
   try {
     const ctrl  = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 800)
+    const timer = setTimeout(() => ctrl.abort(), 2000)
     const res   = await fetch(GPS_BRIDGE_URL, { signal: ctrl.signal })
     clearTimeout(timer)
     if (res.ok) {
@@ -183,16 +186,22 @@ async function tryBridgeLocation(): Promise<LocationFix | null> {
         activeLocationProvider = async () => {
           try {
             const c = new AbortController()
-            const t = setTimeout(() => c.abort(), 800)
+            const t = setTimeout(() => c.abort(), 2000)
             const r = await fetch(GPS_BRIDGE_URL, { signal: c.signal })
             clearTimeout(t)
             return r.ok ? parseLocation(await fetchJsonTolerant(r)) : null
           } catch { return null }
         }
         return loc
+      } else {
+        reportStatus(`local GPS bridge: reachable but parse failed (status ${res.status})`)
       }
+    } else {
+      reportStatus(`local GPS bridge: HTTP ${res.status}`)
     }
-  } catch { /* server not running */ }
+  } catch (e: any) {
+    reportStatus(`local GPS bridge: ${e?.name === 'AbortError' ? 'timeout' : String(e)}`)
+  }
 
   // --- 1. Flutter InAppWebView callHandler ---
   const fwv = (window as any).flutter_inappwebview
@@ -213,7 +222,7 @@ async function tryBridgeLocation(): Promise<LocationFix | null> {
   }
 
   // --- 2. Android addJavascriptInterface objects ---
-  const ifaces = ['Android', 'EvenApp', 'EvenHub', 'JsBridge', 'AndroidBridge', 'NativeBridge']
+  const ifaces = ['EvenAppBridge', 'Android', 'EvenApp', 'EvenHub', 'JsBridge', 'AndroidBridge', 'NativeBridge']
   for (const name of ifaces) {
     const obj = (window as any)[name]
     if (obj == null) continue
@@ -249,6 +258,7 @@ async function tryBridgeLocation(): Promise<LocationFix | null> {
     } catch { }
   }
 
+  reportStatus('bridge probe: no provider found (GPS, Tasker, Flutter, Android all failed)')
   return null
 }
 
@@ -283,7 +293,16 @@ async function pollLocation() {
     updatePollRate()
   }
   const loc = await activeLocationProvider()
-  if (!loc) return
+  if (!loc) {
+    // Reset provider after 5 consecutive nulls so the probe re-runs next tick
+    if (++locationProviderFailures >= 5) {
+      reportStatus('bridge: provider returned null 5x — resetting for re-probe')
+      activeLocationProvider = null
+      locationProviderFailures = 0
+    }
+    return
+  }
+  locationProviderFailures = 0
 
   const now = Date.now()
 
@@ -312,6 +331,9 @@ async function pollLocation() {
 
   currentLat = loc.lat
   currentLng = loc.lng
+
+  // Fetch speed limit — cached by road segment, degrades gracefully on 403
+  getSpeedLimitMph(loc.lat, loc.lng).then(l => { limitMph = l }).catch(() => {})
 
   // ─── Media state ──────────────────────────────────────────────────────────
   const prevMediaPlaying = mediaPlaying
@@ -379,6 +401,7 @@ async function pollLocation() {
     } else {
       // In-place text update only — live updates without full rebuild
       await refreshBanner()
+      await refreshTime()
       await refreshSpeed()
       await refreshMinimap()
       if (mediaPlaying) await refreshMedia()
@@ -595,14 +618,18 @@ function effectiveStepIdx(): number {
 }
 
 /** Advance past any step whose endpoint we've entered.
- *  Threshold scales with speed to keep roughly 15 s of lookahead:
- *    20 mph → ~134 m   40 mph → ~268 m   60 mph → ~402 m
- *  Minimum 120 m so the step still advances promptly when nearly stopped. */
+ *  Threshold scales with speed but is also capped at 40% of the step's own
+ *  distance, so short interchange/ramp steps don't trigger prematurely when
+ *  the speed-based radius exceeds the step length itself.
+ *    20 mph → ~134 m   40 mph → ~268 m   60 mph → ~402 m  (before step cap) */
 function advanceStep(lat: number, lng: number): number {
-  const threshold = Math.max(120, speedMph * 6.7)  // 6.7 ≈ 15 s × 0.447 (mph→m/s)
   for (let i = stepIdx; i < steps.length - 1; i++) {
     const s = steps[i]
     if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
+    const threshold = Math.min(
+      Math.max(30, speedMph * 6.7),        // speed-scaled lookahead, floor 30 m
+      Math.max(30, s.distanceMeters * 0.4) // cap at 40% of this step's length
+    )
     if (haversine(lat, lng, s.endLat, s.endLng) < threshold) return i + 1
   }
   return stepIdx
@@ -638,13 +665,7 @@ async function reroute() {
 let minimapRefreshing = false
 let lastMinimapBytes: number[] | null = null
 
-function minimapZoom(): number {
-  const d = distToManeuverM()
-  if (d <   400) return 17
-  if (d <  1600) return 16
-  if (d <  5000) return 15
-  return 14
-}
+const MINIMAP_ZOOM = 14  // fixed — passive-mode level; dynamic zoom caused thrashing
 
 // ─── Full page build ──────────────────────────────────────────────────────────
 
@@ -672,6 +693,7 @@ async function buildPage() {
       const mediaContainer = buildMediaContainer(buildMediaText(mediaTitle, mediaArtist))
       if (mediaContainer) textContainers.push(mediaContainer)
     }
+    textContainers.push(buildTimeContainer(formatClockTime()))
 
     const imageContainers: ImageContainerProperty[] = [
       ...buildMinimapImageContainers(settings),
@@ -726,6 +748,17 @@ async function refreshBanner() {
   }))
 }
 
+async function refreshTime() {
+  const content = formatClockTime()
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.CLOCK,
+    containerName: 'clock',
+    content,
+    contentOffset: 0,
+    contentLength: content.length,
+  }))
+}
+
 async function refreshSpeed() {
   if (!settings.speed.visible) return
   const content = buildSpeedText(speedMph, limitMph, settings)
@@ -759,11 +792,11 @@ async function refreshMinimap() {
   minimapRefreshing = true
   try {
     // Kick off a background road-data refresh (non-blocking; uses cached data this frame)
-    refreshRoads(currentLat, currentLng, minimapZoom(), MINIMAP_IMG_W, MINIMAP_IMG_H).catch(() => {})
+    refreshRoads(currentLat, currentLng, MINIMAP_ZOOM, MINIMAP_IMG_W, MINIMAP_IMG_H).catch(() => {})
 
     const imageData = renderMinimapBmp(
       currentLat, currentLng, steps, effectiveStepIdx(),
-      MINIMAP_IMG_W, MINIMAP_IMG_H, minimapZoom(),
+      MINIMAP_IMG_W, MINIMAP_IMG_H, MINIMAP_ZOOM,
       getCachedRoads(),
       activeHeadingDeg(),
     )
@@ -821,6 +854,7 @@ function startGPS() {
       if (!stepped) {
         // Same step — refresh text in-place
         await refreshBanner()
+        await refreshTime()
         await refreshSpeed()
         await refreshMinimap()
         return
@@ -984,10 +1018,11 @@ export async function menuEndNavigation() {
   await buildPage()
 }
 
-/** Go to passive mode without clearing the route. */
-export async function menuGoPassive() {
-  if (navState === 'passive') return
+/** Go to passive mode and clear the route so the minimap doesn't show a stale line. */
+export async function menuGoPassive() {  if (navState === 'passive') return
   navState = 'passive'
+  steps   = []
+  stepIdx = 0
   stopGPS()
   stopAndroidPoll()
   await buildPage()
@@ -998,6 +1033,12 @@ export async function menuGoPassive() {
 /** Returns raw device compass heading (degrees, 0 = north, CW) or null if unavailable. */
 export function getDeviceHeading(): number | null {
   return deviceHeadingDeg
+}
+
+/** Returns the current GPS position, or null if no fix yet. */
+export function getCurrentLocation(): { lat: number; lng: number } | null {
+  if (!currentLat && !currentLng) return null
+  return { lat: currentLat, lng: currentLng }
 }
 
 /** Manual north calibration: call when phone is physically pointing north.

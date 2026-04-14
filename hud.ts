@@ -5,8 +5,8 @@
 // Canvas: 576 × 288 px, 4-bit greyscale
 //
 // Layout zones:
-//   Banner   y=0   h=44   (maneuver instruction + distance + step/ETA)
-//   Clear    y=44  h=152  (intentionally empty — environment awareness)
+//   Banner   y=0   h=80   (maneuver instruction + distance + step/ETA)
+//   Clear    y=80  h=116  (intentionally empty — environment awareness)
 //   Bottom   y=196 h=92   (minimap bottom-left + speed stack bottom-right)
 //
 // Container map:
@@ -14,6 +14,7 @@
 //   ID 2  — banner text container          (top strip)
 //   ID 3  — minimap text container         (bottom-left, conditional)
 //   ID 4  — speed text container           (bottom-right, conditional)
+//   ID 9  — clock text container           (top-right corner, always present)
 //
 // The event-capture container sits behind everything. We use
 // textContainerUpgrade() for in-place updates to avoid full redraws.
@@ -25,7 +26,7 @@ import {
 
 import { RouteStep } from './maps'
 import { HudSettings } from './settings'
-import { formatInstruction, formatDistance, formatETA } from './display'
+import { formatInstruction, formatDistance, formatETA, formatClockTime } from './display'
 
 // ─── Canvas constants ─────────────────────────────────────────────────────────
 
@@ -52,8 +53,11 @@ const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
 
+// Clock container — top-right corner
+const CLOCK_W = 100
+
 // Media container — bottom strip between minimap and speed
-const MEDIA_PAD = 6
+const MEDIA_PAD = 28
 const MEDIA_X   = MAP_PAD_L + MINIMAP_IMG_W + MEDIA_PAD          // 130
 const MEDIA_W   = CANVAS_W - MEDIA_X - (56 + SPD_RIGHT_MARGIN + MEDIA_PAD)  // 376
 
@@ -64,6 +68,7 @@ export const CID = {
   BANNER: 2,
   SPEED:  4,
   MEDIA:  8,
+  CLOCK:  9,
 } as const
 
 // 4 tile IDs for the 2×2 minimap grid (row-major, left-to-right top-to-bottom)
@@ -93,18 +98,21 @@ export function buildBannerText(
   liveDistM?: number,
 ): string {
   if (state === 'idle')        return 'G2 Maps\nSet a destination'
-  if (state === 'passive')     return 'Passive map\nNo active route'
+  if (state === 'passive')     return 'No destination set\n '
   if (state === 'paused')      return 'Navigation paused\nTap to resume'
   if (state === 'calibrating') return 'Compass Calibration\nWave phone in figure-8 pattern'
 
-  const step = steps[stepIdx]
+  const step      = steps[stepIdx]
   if (!step) return 'Finding location…\n'
 
-  const instr = formatInstruction(step.instruction)
-  const dist  = formatDistance(liveDistM ?? step.distanceMeters)
-  const eta   = formatETA(steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0))
+  const instrStep  = steps[stepIdx + 1] ?? step  // next maneuver; fallback on last step
+  const instr      = formatInstruction(instrStep.instruction)
+  const dist       = formatDistance(liveDistM ?? step.distanceMeters)
+  const totalSecs  = steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0)
+  const eta        = formatETA(totalSecs)
+  const arrival    = formatClockTime(new Date(Date.now() + totalSecs * 1000))
 
-  return `${instr}\n${dist}  •  ${stepIdx + 1}/${steps.length}  •  ETA ${eta}`
+  return `${instr}\n${dist}  •  ${stepIdx + 1}/${steps.length}  •  ${eta}  ${arrival}`
 }
 
 // ─── Speed block text ─────────────────────────────────────────────────────────
@@ -148,14 +156,14 @@ export function buildEventContainer(): TextContainerProperty {
   })
 }
 
-/** Banner text container — top strip. */
+/** Banner text container — top strip. Width leaves room for clock in top-right. */
 export function buildBannerContainer(content: string): TextContainerProperty {
   return new TextContainerProperty({
     containerID:   CID.BANNER,
     containerName: 'banner',
     xPosition:     0,
     yPosition:     0,
-    width:         CANVAS_W,
+    width:         CANVAS_W - CLOCK_W,
     height:        BANNER_H,
     borderWidth:   0,
     borderColor:   0,
@@ -217,6 +225,23 @@ export function buildMediaContainer(content: string): TextContainerProperty | nu
     yPosition:     CANVAS_H - 72,
     width:         MEDIA_W,
     height:        72,
+    borderWidth:   0,
+    borderColor:   0,
+    paddingLength: 4,
+    content,
+    isEventCapture: 0,
+  })
+}
+
+/** Clock time container — top-right corner. Always present. */
+export function buildTimeContainer(content: string): TextContainerProperty {
+  return new TextContainerProperty({
+    containerID:   CID.CLOCK,
+    containerName: 'clock',
+    xPosition:     CANVAS_W - CLOCK_W,
+    yPosition:     0,
+    width:         CLOCK_W,
+    height:        40,
     borderWidth:   0,
     borderColor:   0,
     paddingLength: 4,
