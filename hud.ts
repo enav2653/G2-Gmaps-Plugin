@@ -241,7 +241,7 @@ export function buildTimeContainer(content: string): TextContainerProperty {
     xPosition:     CANVAS_W - CLOCK_W,
     yPosition:     0,
     width:         CLOCK_W,
-    height:        28,
+    height:        40,
     borderWidth:   0,
     borderColor:   0,
     paddingLength: 4,

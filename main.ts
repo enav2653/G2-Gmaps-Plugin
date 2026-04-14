@@ -332,6 +332,9 @@ async function pollLocation() {
   currentLat = loc.lat
   currentLng = loc.lng
 
+  // Fetch speed limit — cached by road segment, degrades gracefully on 403
+  getSpeedLimitMph(loc.lat, loc.lng).then(l => { limitMph = l }).catch(() => {})
+
   // ─── Media state ──────────────────────────────────────────────────────────
   const prevMediaPlaying = mediaPlaying
   const prevMediaTitle   = mediaTitle
@@ -1015,10 +1018,12 @@ export async function menuEndNavigation() {
   await buildPage()
 }
 
-/** Go to passive mode without clearing the route. */
+/** Go to passive mode and clear the route so the minimap doesn't show a stale line. */
 export async function menuGoPassive() {
   if (navState === 'passive') return
   navState = 'passive'
+  steps   = []
+  stepIdx = 0
   stopGPS()
   stopAndroidPoll()
   await buildPage()
