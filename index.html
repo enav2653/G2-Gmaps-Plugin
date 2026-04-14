@@ -108,6 +108,17 @@
                   line-height: 1; padding: 4px 4px; cursor: pointer; flex-shrink: 0; }
     .fav-remove { background: none; border: none; color: var(--muted); font-size: 20px;
                   line-height: 1; padding: 4px 2px; cursor: pointer; flex-shrink: 0; }
+    .fav-reorder { background: none; border: none; color: var(--muted); font-size: 16px;
+                   line-height: 1; padding: 4px 3px; cursor: pointer; flex-shrink: 0; }
+    .fav-reorder:disabled { opacity: 0.2; cursor: default; }
+
+    /* ── Favorites sort bar ── */
+    .fav-sort-row { display: flex; gap: 6px; padding: 0 16px 10px; }
+    .fav-sort-btn { flex: 1; padding: 5px 0; background: none;
+                    border: 0.5px solid var(--border); border-radius: 8px;
+                    color: var(--muted); font-size: 11px; cursor: pointer; transition: all 0.1s; }
+    .fav-sort-btn.active { border-color: var(--accent); color: var(--accent);
+                           background: rgba(55,138,221,0.08); }
 
     /* ── Favorite name modal ── */
     .fav-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.75);
@@ -253,6 +264,11 @@
     <div class="fav-header-row">
       <div class="fav-header">Favorites</div>
       <button class="fav-save-here-btn" id="fav-save-here-btn">+ Save here</button>
+    </div>
+    <div class="fav-sort-row" id="fav-sort-row" style="display:none">
+      <button class="fav-sort-btn" data-sort="custom">Custom</button>
+      <button class="fav-sort-btn" data-sort="name">Name</button>
+      <button class="fav-sort-btn" data-sort="distance">Distance</button>
     </div>
     <div id="fav-list"></div>
     <div class="fav-empty" id="fav-empty">No favorites saved</div>
@@ -620,41 +636,95 @@
   })
   favModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') favModalSave.click() })
 
+  // ── Favorites sort ─────────────────────────────────────────────────────────
+  let favSortMode = persistGet('g2maps_fav_sort') || 'custom'
+
+  function distMi(lat1, lng1, lat2, lng2) {
+    const R = 3958.8, dLat = (lat2-lat1)*Math.PI/180, dLng = (lng2-lng1)*Math.PI/180
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2
+    return R * 2 * Math.asin(Math.sqrt(a))
+  }
+
+  document.querySelectorAll('.fav-sort-btn').forEach(btn => {
+    if (btn.dataset.sort === favSortMode) btn.classList.add('active')
+    btn.addEventListener('click', () => {
+      favSortMode = btn.dataset.sort
+      persistSet('g2maps_fav_sort', favSortMode)
+      document.querySelectorAll('.fav-sort-btn').forEach(b => b.classList.toggle('active', b === btn))
+      renderFavorites()
+    })
+  })
+
   // ── Favorites rendering ────────────────────────────────────────────────────
   function renderFavorites() {
-    const favs  = loadFavorites()
-    const list  = document.getElementById('fav-list')
-    const empty = document.getElementById('fav-empty')
-    empty.style.display = favs.length ? 'none' : ''
-    list.innerHTML = favs.map((f, i) => `
-      <div class="fav-item" data-idx="${i}">
-        <div class="fav-icon">★</div>
-        <div class="fav-text">
-          <div class="fav-name">${esc(f.name || f.label)}</div>
-          ${f.label && f.label !== (f.name || '') ? `<div class="fav-addr">${esc(f.label)}</div>` : ''}
-        </div>
-        <button class="fav-rename" data-idx="${i}" title="Rename">✎</button>
-        <button class="fav-remove" data-idx="${i}" title="Remove">×</button>
-      </div>`).join('')
+    const favs    = loadFavorites()
+    const list    = document.getElementById('fav-list')
+    const empty   = document.getElementById('fav-empty')
+    const sortRow = document.getElementById('fav-sort-row')
+    empty.style.display   = favs.length ? 'none' : ''
+    sortRow.style.display = favs.length > 1 ? '' : 'none'
+
+    // Build sorted display order (array of original indices)
+    const pos = getCurrentLocation()
+    let order = favs.map((_, i) => i)
+    if (favSortMode === 'name') {
+      order.sort((a, b) => (favs[a].name || favs[a].label).localeCompare(favs[b].name || favs[b].label))
+    } else if (favSortMode === 'distance' && pos) {
+      order.sort((a, b) => distMi(pos.lat, pos.lng, favs[a].lat, favs[a].lng)
+                         - distMi(pos.lat, pos.lng, favs[b].lat, favs[b].lng))
+    }
+
+    list.innerHTML = order.map((fi, di) => {
+      const f = favs[fi]
+      const distTag = favSortMode === 'distance' && pos
+        ? ` <span style="font-size:11px;color:var(--muted)">${distMi(pos.lat,pos.lng,f.lat,f.lng) < 10 ? distMi(pos.lat,pos.lng,f.lat,f.lng).toFixed(1) : Math.round(distMi(pos.lat,pos.lng,f.lat,f.lng))} mi</span>`
+        : ''
+      const reorderBtns = favSortMode === 'custom' ? `
+        <button class="fav-reorder" data-fi="${fi}" data-dir="-1" title="Move up"   ${di === 0              ? 'disabled' : ''}>↑</button>
+        <button class="fav-reorder" data-fi="${fi}" data-dir="1"  title="Move down" ${di === favs.length-1  ? 'disabled' : ''}>↓</button>` : ''
+      return `
+        <div class="fav-item" data-fi="${fi}">
+          <div class="fav-icon">★</div>
+          <div class="fav-text">
+            <div class="fav-name">${esc(f.name || f.label)}${distTag}</div>
+            ${f.label && f.label !== (f.name||'') ? `<div class="fav-addr">${esc(f.label)}</div>` : ''}
+          </div>
+          ${reorderBtns}
+          <button class="fav-rename" data-fi="${fi}" title="Rename">✎</button>
+          <button class="fav-remove" data-fi="${fi}" title="Remove">×</button>
+        </div>`
+    }).join('')
+
     list.querySelectorAll('.fav-item').forEach(el => {
       el.addEventListener('click', e => {
-        if (e.target.closest('.fav-remove') || e.target.closest('.fav-rename')) return
-        const f = favs[parseInt(el.dataset.idx)]
+        if (e.target.closest('.fav-remove,.fav-rename,.fav-reorder')) return
+        const f = favs[parseInt(el.dataset.fi)]
         selectLocation({ lat: f.lat, lng: f.lng, name: f.name || f.label, label: f.label })
       })
     })
     list.querySelectorAll('.fav-rename').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation()
-        const idx = parseInt(btn.dataset.idx)
-        const f   = favs[idx]
-        openFavModal({ lat: f.lat, lng: f.lng, label: f.label, name: f.name }, f.name || f.label, idx)
+        const fi = parseInt(btn.dataset.fi), f = favs[fi]
+        openFavModal({ lat: f.lat, lng: f.lng, label: f.label, name: f.name }, f.name || f.label, fi)
       })
     })
     list.querySelectorAll('.fav-remove').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation()
-        storeFavorites(favs.filter((_, i) => i !== parseInt(btn.dataset.idx)))
+        storeFavorites(favs.filter((_, i) => i !== parseInt(btn.dataset.fi)))
+        renderFavorites()
+      })
+    })
+    list.querySelectorAll('.fav-reorder').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        const fi = parseInt(btn.dataset.fi), dir = parseInt(btn.dataset.dir)
+        const di = order.indexOf(fi), targetFi = order[di + dir]
+        if (targetFi === undefined) return
+        const updated = [...favs];
+        [updated[fi], updated[targetFi]] = [updated[targetFi], updated[fi]]
+        storeFavorites(updated)
         renderFavorites()
       })
     })
