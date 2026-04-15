@@ -295,6 +295,76 @@
     <div id="gmaps-key-status" style="font-size:11px;opacity:.6;min-height:14px"></div>
   </div>
 
+  <div class="settings-section">Adventure mode</div>
+
+  <!-- Profile pill toggle: Standard / Adventure -->
+  <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:10px">
+    <div class="toggle-info">
+      <div class="toggle-label">Routing profile</div>
+      <div class="toggle-sub">Adventure uses Valhalla motorcycle routing — prefers backroads over highways.</div>
+    </div>
+    <div style="display:flex;gap:0;border:1px solid #333;border-radius:8px;overflow:hidden">
+      <button id="profile-standard-btn"
+        style="flex:1;padding:8px;font-size:13px;border:none;cursor:pointer;transition:background .15s">
+        Standard
+      </button>
+      <button id="profile-adventure-btn"
+        style="flex:1;padding:8px;font-size:13px;border:none;border-left:1px solid #333;cursor:pointer;transition:background .15s">
+        Adventure
+      </button>
+    </div>
+  </div>
+
+  <!-- Adventure sub-options (shown only in adventure mode) -->
+  <div id="adventure-options" style="display:none">
+    <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div class="toggle-info">
+        <div class="toggle-label">Stadia Maps API key</div>
+        <div class="toggle-sub">Free key required for Valhalla routing. Sign up at <strong>stadiamaps.com/create-api-key</strong> — no credit card, 200k requests/month.</div>
+      </div>
+      <input type="text" id="stadia-key-input" placeholder="your-stadia-api-key"
+        style="font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid #333;
+               background:#111;color:#eee;width:100%;box-sizing:border-box;font-family:monospace">
+      <div id="stadia-key-status" style="font-size:11px;opacity:.6;min-height:14px"></div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Avoid highways</div>
+        <div class="toggle-sub">Strongly prefer backroads over interstates and motorways</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="adv-avoid-highways">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Avoid toll roads</div>
+        <div class="toggle-sub">Route around tollways where possible</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="adv-avoid-tolls">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Comfortable with gravel/unpaved</div>
+        <div class="toggle-sub">Allow unpaved roads and forest tracks in the route</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="adv-gravel">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+  </div>
+
   <div class="settings-section">Diagnostics</div>
 
   <div class="toggle-row">
@@ -446,7 +516,7 @@
 </div>
 
 <script type="module">
-  import { geocode, setGoogleMapsKey, hasGoogleMapsKey } from './maps.ts'
+  import { geocode, setGoogleMapsKey, hasGoogleMapsKey, setStadiaKey, hasStadiaKey } from './maps.ts'
   import { startNavigation, menuPauseResume, menuGoPassive, reloadSettings, getDeviceHeading, calibrateCompassManual, getHudState, getCurrentLocation } from './main.ts'
   import { saveSettings, loadSettings, DEFAULT_SETTINGS, persistGet, persistSet } from './settings.ts'
 
@@ -881,26 +951,69 @@
 
   // ── Settings tab ───────────────────────────────────────────────────────────
   const settingsEls = {
-    mapVisible:   document.getElementById('map-visible'),
-    spdVisible:   document.getElementById('spd-visible'),
-    limitVisible: document.getElementById('limit-visible'),
-    gmapsKey:     document.getElementById('gmaps-key-input'),
-    gmapsStatus:  document.getElementById('gmaps-key-status'),
+    mapVisible:        document.getElementById('map-visible'),
+    spdVisible:        document.getElementById('spd-visible'),
+    limitVisible:      document.getElementById('limit-visible'),
+    gmapsKey:          document.getElementById('gmaps-key-input'),
+    gmapsStatus:       document.getElementById('gmaps-key-status'),
+    stadiaKey:         document.getElementById('stadia-key-input'),
+    stadiaStatus:      document.getElementById('stadia-key-status'),
+    advAvoidHighways:  document.getElementById('adv-avoid-highways'),
+    advAvoidTolls:     document.getElementById('adv-avoid-tolls'),
+    advGravel:         document.getElementById('adv-gravel'),
   }
+  const advOptionsEl  = document.getElementById('adventure-options')
+  const profileStdBtn = document.getElementById('profile-standard-btn')
+  const profileAdvBtn = document.getElementById('profile-adventure-btn')
+
+  // Active profile is tracked locally so the save button can read it
+  let activeProfile = 'standard'
+
+  const PILL_ACTIVE   = 'background:#2a7f4e;color:#fff'
+  const PILL_INACTIVE = 'background:#1a1a1a;color:#888'
+
+  function setProfileUI(profile) {
+    activeProfile = profile
+    profileStdBtn.style.cssText += ';' + (profile === 'standard' ? PILL_ACTIVE : PILL_INACTIVE)
+    profileAdvBtn.style.cssText += ';' + (profile === 'adventure' ? PILL_ACTIVE : PILL_INACTIVE)
+    advOptionsEl.style.display = profile === 'adventure' ? 'block' : 'none'
+  }
+
+  profileStdBtn.addEventListener('click', () => setProfileUI('standard'))
+  profileAdvBtn.addEventListener('click', () => setProfileUI('adventure'))
+
+  // Live Stadia key feedback
+  settingsEls.stadiaKey.addEventListener('input', () => {
+    const v = settingsEls.stadiaKey.value.trim()
+    settingsEls.stadiaStatus.textContent = v ? '✓ Will activate on Save' : ''
+  })
 
   function loadUIFromSettings() {
     const s = loadSettings()
     settingsEls.mapVisible.checked   = s.minimap.visible
     settingsEls.spdVisible.checked   = s.speed.visible
     settingsEls.limitVisible.checked = s.speed.showLimit
-    const savedKey = persistGet('g2maps_gmaps_key') || import.meta.env.VITE_GOOGLE_MAPS_KEY || ''
-    settingsEls.gmapsKey.value = savedKey
-    settingsEls.gmapsStatus.textContent = savedKey
+
+    // Google key
+    const savedGKey = persistGet('g2maps_gmaps_key') || import.meta.env.VITE_GOOGLE_MAPS_KEY || ''
+    settingsEls.gmapsKey.value = savedGKey
+    settingsEls.gmapsStatus.textContent = savedGKey
       ? '✓ Google routing & autocomplete active'
       : 'Using OpenStreetMap (OSRM + Nominatim) — no key needed'
+
+    // Adventure / route settings
+    setProfileUI(s.route?.profile ?? 'standard')
+    settingsEls.advAvoidHighways.checked = s.route?.avoidHighways ?? false
+    settingsEls.advAvoidTolls.checked    = s.route?.avoidTolls    ?? false
+    settingsEls.advGravel.checked        = s.route?.gravel        ?? false
+
+    // Stadia key
+    const savedSKey = persistGet('g2maps_stadia_key') || ''
+    settingsEls.stadiaKey.value = savedSKey
+    settingsEls.stadiaStatus.textContent = savedSKey ? '✓ Adventure routing ready' : ''
   }
 
-  // Live status feedback as user types the key
+  // Live status feedback as user types the Google key
   settingsEls.gmapsKey.addEventListener('input', () => {
     const v = settingsEls.gmapsKey.value.trim()
     settingsEls.gmapsStatus.textContent = v
@@ -913,24 +1026,40 @@
     settingsEls.mapVisible.checked   = d.minimap.visible
     settingsEls.spdVisible.checked   = d.speed.visible
     settingsEls.limitVisible.checked = d.speed.showLimit
+    setProfileUI('standard')
+    settingsEls.advAvoidHighways.checked = false
+    settingsEls.advAvoidTolls.checked    = false
+    settingsEls.advGravel.checked        = false
   })
 
   document.getElementById('save-btn').addEventListener('click', async () => {
     const s = {
       minimap: { visible: settingsEls.mapVisible.checked },
       speed:   { visible: settingsEls.spdVisible.checked, showLimit: settingsEls.limitVisible.checked },
+      route:   {
+        profile:       activeProfile,
+        avoidHighways: settingsEls.advAvoidHighways.checked,
+        avoidTolls:    settingsEls.advAvoidTolls.checked,
+        gravel:        settingsEls.advGravel.checked,
+      },
     }
     saveSettings(s)
     await reloadSettings()
 
-    // Save Google Maps key (or clear it)
-    const newKey = settingsEls.gmapsKey.value.trim()
-    persistSet('g2maps_gmaps_key', newKey)
-    setGoogleMapsKey(newKey || null)
-    if (newKey) loadGoogleMapsJs(newKey)
-    settingsEls.gmapsStatus.textContent = newKey
+    // Save Google Maps key
+    const newGKey = settingsEls.gmapsKey.value.trim()
+    persistSet('g2maps_gmaps_key', newGKey)
+    setGoogleMapsKey(newGKey || null)
+    if (newGKey) loadGoogleMapsJs(newGKey)
+    settingsEls.gmapsStatus.textContent = newGKey
       ? '✓ Google routing & autocomplete active'
       : 'Using OpenStreetMap (OSRM + Nominatim) — no key needed'
+
+    // Save Stadia Maps key
+    const newSKey = settingsEls.stadiaKey.value.trim()
+    persistSet('g2maps_stadia_key', newSKey)
+    setStadiaKey(newSKey || null)
+    settingsEls.stadiaStatus.textContent = newSKey ? '✓ Adventure routing ready' : ''
 
     const el = document.getElementById('settings-status')
     el.textContent = 'Saved — glasses updated'

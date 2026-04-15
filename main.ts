@@ -9,7 +9,7 @@ import {
   ImageRawDataUpdate,
 } from '@evenrealities/even_hub_sdk'
 
-import { getRoute, RouteStep, setGoogleMapsKey } from './maps'
+import { getRoute, RouteStep, setGoogleMapsKey, setStadiaKey } from './maps'
 import { formatClockTime } from './display'
 import { loadSettings, HudSettings } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
@@ -38,10 +38,12 @@ import {
 let bridge: Awaited<ReturnType<typeof waitForEvenAppBridge>>
 let settings: HudSettings = loadSettings()
 
-// Apply any saved Google Maps API key before the first route request
-;(function applyPersistedGoogleKey() {
-  const k = persistGet('g2maps_gmaps_key')
-  if (k) setGoogleMapsKey(k)
+// Apply any saved API keys before the first route request
+;(function applyPersistedKeys() {
+  const gk = persistGet('g2maps_gmaps_key')
+  if (gk) setGoogleMapsKey(gk)
+  const sk = persistGet('g2maps_stadia_key')
+  if (sk) setStadiaKey(sk)
 })()
 
 let steps:       RouteStep[] = []
@@ -724,7 +726,7 @@ async function reroute() {
     const raw = sessionStorage.getItem('g2maps_destination')
     if (!raw) return
     const dest = JSON.parse(raw) as { lat: number; lng: number }
-    steps   = await getRoute({ lat: currentLat, lng: currentLng }, dest)
+    steps   = await getRoute({ lat: currentLat, lng: currentLng }, dest, settings.route)
     stepIdx = 0
     previewStepIdx = null
     reportStatus(`rerouted: ${steps.length} steps`)
@@ -1225,7 +1227,7 @@ export async function startNavigation() {
     }
 
     reportStatus('fetching route…')
-    steps   = await getRoute({ lat: currentLat, lng: currentLng }, { lat: dest.lat, lng: dest.lng })
+    steps   = await getRoute({ lat: currentLat, lng: currentLng }, { lat: dest.lat, lng: dest.lng }, settings.route)
     stepIdx = 0
     reportStatus(`route: ${steps.length} steps`)
 

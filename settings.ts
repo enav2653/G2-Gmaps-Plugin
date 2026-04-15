@@ -6,11 +6,18 @@ export interface HudSettings {
     visible:   boolean
     showLimit: boolean
   }
+  route: {
+    profile:       'standard' | 'adventure'
+    avoidHighways: boolean
+    avoidTolls:    boolean
+    gravel:        boolean   // comfortable with unpaved/gravel roads
+  }
 }
 
 export const DEFAULT_SETTINGS: HudSettings = {
   minimap: { visible: true },
   speed:   { visible: true, showLimit: true },
+  route:   { profile: 'standard', avoidHighways: false, avoidTolls: false, gravel: false },
 }
 
 // ── Persistent storage: localStorage + cookie fallback ────────────────────────
