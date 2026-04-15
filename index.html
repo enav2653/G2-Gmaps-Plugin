@@ -315,6 +315,31 @@
     </div>
   </div>
 
+  <!-- Avoid options — always visible; honoured by Google (standard) and Valhalla (adventure) -->
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Avoid highways</div>
+      <div class="toggle-sub">Prefer backroads over interstates and motorways</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="adv-avoid-highways">
+      <div class="toggle-bg"></div>
+      <div class="toggle-thumb"></div>
+    </label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">Avoid toll roads</div>
+      <div class="toggle-sub">Route around tollways where possible</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="adv-avoid-tolls">
+      <div class="toggle-bg"></div>
+      <div class="toggle-thumb"></div>
+    </label>
+  </div>
+
   <!-- Adventure sub-options (shown only in adventure mode) -->
   <div id="adventure-options" style="display:none">
     <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:6px">
@@ -326,30 +351,6 @@
         style="font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid #333;
                background:#111;color:#eee;width:100%;box-sizing:border-box;font-family:monospace">
       <div id="stadia-key-status" style="font-size:11px;opacity:.6;min-height:14px"></div>
-    </div>
-
-    <div class="toggle-row">
-      <div class="toggle-info">
-        <div class="toggle-label">Avoid highways</div>
-        <div class="toggle-sub">Strongly prefer backroads over interstates and motorways</div>
-      </div>
-      <label class="toggle">
-        <input type="checkbox" id="adv-avoid-highways">
-        <div class="toggle-bg"></div>
-        <div class="toggle-thumb"></div>
-      </label>
-    </div>
-
-    <div class="toggle-row">
-      <div class="toggle-info">
-        <div class="toggle-label">Avoid toll roads</div>
-        <div class="toggle-sub">Route around tollways where possible</div>
-      </div>
-      <label class="toggle">
-        <input type="checkbox" id="adv-avoid-tolls">
-        <div class="toggle-bg"></div>
-        <div class="toggle-thumb"></div>
-      </label>
     </div>
 
     <div class="toggle-row">

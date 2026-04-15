@@ -76,7 +76,7 @@ export async function getRoute(
     return getRouteValhalla(origin, destination, opts, runtimeStadiaKey)
   }
   const key = activeGoogleKey()
-  return key ? getRouteGoogle(origin, destination, key) : getRouteOSRM(origin, destination)
+  return key ? getRouteGoogle(origin, destination, key, opts) : getRouteOSRM(origin, destination)
 }
 
 export async function geocode(address: string): Promise<{ lat: number; lng: number; label: string }> {
@@ -123,7 +123,12 @@ function parseDuration(dur?: string): number {
 
 // ─── Google backend ───────────────────────────────────────────────────────────
 
-async function getRouteGoogle(origin: LatLng, destination: LatLng, key: string): Promise<RouteStep[]> {
+async function getRouteGoogle(
+  origin: LatLng,
+  destination: LatLng,
+  key: string,
+  opts?: RouteOptions,
+): Promise<RouteStep[]> {
   const url = 'https://routes.googleapis.com/directions/v2:computeRoutes'
 
   const res = await fetch(url, {
@@ -144,6 +149,10 @@ async function getRouteGoogle(origin: LatLng, destination: LatLng, key: string):
       computeAlternativeRoutes: false,
       languageCode: 'en-US',
       units: 'IMPERIAL',
+      routeModifiers: {
+        avoidHighways: opts?.avoidHighways ?? false,
+        avoidTolls:    opts?.avoidTolls    ?? false,
+      },
     }),
   })
 
