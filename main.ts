@@ -11,7 +11,7 @@ import {
 
 import { getRoute, RouteStep, setGoogleMapsKey, setStadiaKey } from './maps'
 import { formatClockTime } from './display'
-import { loadSettings, HudSettings } from './settings'
+import { loadSettings, HudSettings, persistGet } from './settings'
 import { getSpeedLimitMph, resetSpeedLimitCache } from './speedLimit'
 import { renderMinimapBmp, renderCalibrationBmp } from './mapImage'
 import { getCachedRoads, refreshRoads } from './roadData'
