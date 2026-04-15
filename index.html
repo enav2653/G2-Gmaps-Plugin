@@ -282,20 +282,7 @@
      ══════════════════════════════════════════ -->
 <div class="panel" id="panel-settings">
 
-  <div class="settings-section">Routing</div>
-
-  <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:6px">
-    <div class="toggle-info">
-      <div class="toggle-label">Google Maps API key <span style="font-weight:400;opacity:.6">(optional)</span></div>
-      <div class="toggle-sub">Leave empty to use free OpenStreetMap routing &amp; search. Paste your key to enable Google Routes and Places autocomplete.</div>
-    </div>
-    <input type="text" id="gmaps-key-input" placeholder="AIza…"
-      style="font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid #333;
-             background:#111;color:#eee;width:100%;box-sizing:border-box;font-family:monospace">
-    <div id="gmaps-key-status" style="font-size:11px;opacity:.6;min-height:14px"></div>
-  </div>
-
-  <div class="settings-section">Adventure mode</div>
+  <div class="settings-section">Routing profile</div>
 
   <!-- Profile pill toggle: Standard / Adventure -->
   <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:10px">
@@ -315,32 +302,45 @@
     </div>
   </div>
 
-  <!-- Avoid options — always visible; honoured by Google (standard) and Valhalla (adventure) -->
-  <div class="toggle-row">
-    <div class="toggle-info">
-      <div class="toggle-label">Avoid highways</div>
-      <div class="toggle-sub">Prefer backroads over interstates and motorways</div>
+  <!-- Standard sub-options (shown when Standard is active) -->
+  <div id="standard-options">
+    <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div class="toggle-info">
+        <div class="toggle-label">Google Maps API key <span style="font-weight:400;opacity:.6">(optional)</span></div>
+        <div class="toggle-sub">Leave empty to use free OpenStreetMap routing &amp; search. Paste your key to enable Google Routes and Places autocomplete.</div>
+      </div>
+      <input type="text" id="gmaps-key-input" placeholder="AIza…"
+        style="font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid #333;
+               background:#111;color:#eee;width:100%;box-sizing:border-box;font-family:monospace">
+      <div id="gmaps-key-status" style="font-size:11px;opacity:.6;min-height:14px"></div>
     </div>
-    <label class="toggle">
-      <input type="checkbox" id="adv-avoid-highways">
-      <div class="toggle-bg"></div>
-      <div class="toggle-thumb"></div>
-    </label>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Avoid highways</div>
+        <div class="toggle-sub">Prefer backroads over interstates and motorways</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="std-avoid-highways">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Avoid toll roads</div>
+        <div class="toggle-sub">Route around tollways where possible</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="std-avoid-tolls">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
   </div>
 
-  <div class="toggle-row">
-    <div class="toggle-info">
-      <div class="toggle-label">Avoid toll roads</div>
-      <div class="toggle-sub">Route around tollways where possible</div>
-    </div>
-    <label class="toggle">
-      <input type="checkbox" id="adv-avoid-tolls">
-      <div class="toggle-bg"></div>
-      <div class="toggle-thumb"></div>
-    </label>
-  </div>
-
-  <!-- Adventure sub-options (shown only in adventure mode) -->
+  <!-- Adventure sub-options (shown when Adventure is active) -->
   <div id="adventure-options" style="display:none">
     <div class="toggle-row" style="flex-direction:column;align-items:stretch;gap:6px">
       <div class="toggle-info">
@@ -351,6 +351,30 @@
         style="font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid #333;
                background:#111;color:#eee;width:100%;box-sizing:border-box;font-family:monospace">
       <div id="stadia-key-status" style="font-size:11px;opacity:.6;min-height:14px"></div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Avoid highways</div>
+        <div class="toggle-sub">Prefer backroads over interstates and motorways</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="adv-avoid-highways">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Avoid toll roads</div>
+        <div class="toggle-sub">Route around tollways where possible</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="adv-avoid-tolls">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
     </div>
 
     <div class="toggle-row">
@@ -959,10 +983,13 @@
     gmapsStatus:       document.getElementById('gmaps-key-status'),
     stadiaKey:         document.getElementById('stadia-key-input'),
     stadiaStatus:      document.getElementById('stadia-key-status'),
+    stdAvoidHighways:  document.getElementById('std-avoid-highways'),
+    stdAvoidTolls:     document.getElementById('std-avoid-tolls'),
     advAvoidHighways:  document.getElementById('adv-avoid-highways'),
     advAvoidTolls:     document.getElementById('adv-avoid-tolls'),
     advGravel:         document.getElementById('adv-gravel'),
   }
+  const stdOptionsEl  = document.getElementById('standard-options')
   const advOptionsEl  = document.getElementById('adventure-options')
   const profileStdBtn = document.getElementById('profile-standard-btn')
   const profileAdvBtn = document.getElementById('profile-adventure-btn')
@@ -977,11 +1004,20 @@
     activeProfile = profile
     profileStdBtn.style.cssText += ';' + (profile === 'standard' ? PILL_ACTIVE : PILL_INACTIVE)
     profileAdvBtn.style.cssText += ';' + (profile === 'adventure' ? PILL_ACTIVE : PILL_INACTIVE)
+    stdOptionsEl.style.display = profile === 'standard' ? 'block' : 'none'
     advOptionsEl.style.display = profile === 'adventure' ? 'block' : 'none'
   }
 
-  profileStdBtn.addEventListener('click', () => setProfileUI('standard'))
-  profileAdvBtn.addEventListener('click', () => setProfileUI('adventure'))
+  profileStdBtn.addEventListener('click', () => {
+    settingsEls.stdAvoidHighways.checked = settingsEls.advAvoidHighways.checked
+    settingsEls.stdAvoidTolls.checked    = settingsEls.advAvoidTolls.checked
+    setProfileUI('standard')
+  })
+  profileAdvBtn.addEventListener('click', () => {
+    settingsEls.advAvoidHighways.checked = settingsEls.stdAvoidHighways.checked
+    settingsEls.advAvoidTolls.checked    = settingsEls.stdAvoidTolls.checked
+    setProfileUI('adventure')
+  })
 
   // Live Stadia key feedback
   settingsEls.stadiaKey.addEventListener('input', () => {
@@ -1004,8 +1040,12 @@
 
     // Adventure / route settings
     setProfileUI(s.route?.profile ?? 'standard')
-    settingsEls.advAvoidHighways.checked = s.route?.avoidHighways ?? false
-    settingsEls.advAvoidTolls.checked    = s.route?.avoidTolls    ?? false
+    const avoidH = s.route?.avoidHighways ?? false
+    const avoidT = s.route?.avoidTolls    ?? false
+    settingsEls.stdAvoidHighways.checked = avoidH
+    settingsEls.stdAvoidTolls.checked    = avoidT
+    settingsEls.advAvoidHighways.checked = avoidH
+    settingsEls.advAvoidTolls.checked    = avoidT
     settingsEls.advGravel.checked        = s.route?.gravel        ?? false
 
     // Stadia key
@@ -1028,6 +1068,8 @@
     settingsEls.spdVisible.checked   = d.speed.visible
     settingsEls.limitVisible.checked = d.speed.showLimit
     setProfileUI('standard')
+    settingsEls.stdAvoidHighways.checked = false
+    settingsEls.stdAvoidTolls.checked    = false
     settingsEls.advAvoidHighways.checked = false
     settingsEls.advAvoidTolls.checked    = false
     settingsEls.advGravel.checked        = false
@@ -1039,8 +1081,12 @@
       speed:   { visible: settingsEls.spdVisible.checked, showLimit: settingsEls.limitVisible.checked },
       route:   {
         profile:       activeProfile,
-        avoidHighways: settingsEls.advAvoidHighways.checked,
-        avoidTolls:    settingsEls.advAvoidTolls.checked,
+        avoidHighways: activeProfile === 'adventure'
+          ? settingsEls.advAvoidHighways.checked
+          : settingsEls.stdAvoidHighways.checked,
+        avoidTolls:    activeProfile === 'adventure'
+          ? settingsEls.advAvoidTolls.checked
+          : settingsEls.stdAvoidTolls.checked,
         gravel:        settingsEls.advGravel.checked,
       },
     }
