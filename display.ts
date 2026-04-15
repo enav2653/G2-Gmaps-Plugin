@@ -36,9 +36,5 @@ export function formatETA(seconds: number): string {
 }
 
 export function formatClockTime(date: Date = new Date()): string {
-  const h    = date.getHours()
-  const m    = date.getMinutes()
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const h12  = h % 12 || 12
-  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
