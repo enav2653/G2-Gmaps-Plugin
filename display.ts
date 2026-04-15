@@ -35,6 +35,8 @@ export function formatETA(seconds: number): string {
   return m > 0 ? `${h} hr ${m} min` : `${h} hr`
 }
 
-export function formatClockTime(date: Date = new Date()): string {
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+export function formatClockTime(date: Date = new Date(), use24h = false): string {
+  return use24h
+    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    : date.toLocaleTimeString([], { hour: 'numeric',  minute: '2-digit', hour12: true  })
 }

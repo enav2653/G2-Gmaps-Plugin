@@ -778,7 +778,7 @@ async function buildPage() {
       ))
       if (mediaContainer) textContainers.push(mediaContainer)
     }
-    textContainers.push(buildTimeContainer(formatClockTime()))
+    textContainers.push(buildTimeContainer(formatClockTime(undefined, settings.clock?.use24h)))
 
     const imageContainers: ImageContainerProperty[] = [
       ...buildMinimapImageContainers(settings),
@@ -834,7 +834,7 @@ async function refreshBanner() {
 }
 
 async function refreshTime() {
-  const content = formatClockTime()
+  const content = formatClockTime(undefined, settings.clock?.use24h)
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.CLOCK,
     containerName: 'clock',

@@ -392,6 +392,20 @@
     </div>
   </div>
 
+  <div class="settings-section">Clock</div>
+
+  <div class="toggle-row">
+    <div class="toggle-info">
+      <div class="toggle-label">24-hour clock</div>
+      <div class="toggle-sub">Show time in 24h format (e.g. 15:45 instead of 3:45 PM)</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="clock-use24h">
+      <div class="toggle-bg"></div>
+      <div class="toggle-thumb"></div>
+    </label>
+  </div>
+
   <div class="settings-section">Diagnostics</div>
 
   <div class="toggle-row">
@@ -985,6 +999,7 @@
     gmapsStatus:       document.getElementById('gmaps-key-status'),
     stadiaKey:         document.getElementById('stadia-key-input'),
     stadiaStatus:      document.getElementById('stadia-key-status'),
+    clock24h:          document.getElementById('clock-use24h'),
     stdAvoidHighways:  document.getElementById('std-avoid-highways'),
     stdAvoidTolls:     document.getElementById('std-avoid-tolls'),
     advAvoidHighways:  document.getElementById('adv-avoid-highways'),
@@ -1001,6 +1016,10 @@
 
   const PILL_ACTIVE   = 'background:#2a7f4e;color:#fff'
   const PILL_INACTIVE = 'background:#1a1a1a;color:#888'
+
+  function localePrefers24h() {
+    return new Intl.DateTimeFormat([], { hour: 'numeric' }).resolvedOptions().hour12 === false
+  }
 
   function setProfileUI(profile) {
     activeProfile = profile
@@ -1032,6 +1051,7 @@
     settingsEls.mapVisible.checked   = s.minimap.visible
     settingsEls.spdVisible.checked   = s.speed.visible
     settingsEls.limitVisible.checked = s.speed.showLimit
+    settingsEls.clock24h.checked     = s.clock?.use24h ?? localePrefers24h()
 
     // Google key
     const savedGKey = persistGet('g2maps_gmaps_key') || import.meta.env.VITE_GOOGLE_MAPS_KEY || ''
@@ -1069,6 +1089,7 @@
     settingsEls.mapVisible.checked   = d.minimap.visible
     settingsEls.spdVisible.checked   = d.speed.visible
     settingsEls.limitVisible.checked = d.speed.showLimit
+    settingsEls.clock24h.checked     = localePrefers24h()
     setProfileUI('standard')
     settingsEls.stdAvoidHighways.checked = false
     settingsEls.stdAvoidTolls.checked    = false
@@ -1081,6 +1102,7 @@
     const s = {
       minimap: { visible: settingsEls.mapVisible.checked },
       speed:   { visible: settingsEls.spdVisible.checked, showLimit: settingsEls.limitVisible.checked },
+      clock:   { use24h: settingsEls.clock24h.checked },
       route:   {
         profile:       activeProfile,
         avoidHighways: activeProfile === 'adventure'

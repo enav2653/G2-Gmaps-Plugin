@@ -12,12 +12,16 @@ export interface HudSettings {
     avoidTolls:    boolean
     gravel:        boolean   // comfortable with unpaved/gravel roads
   }
+  clock: {
+    use24h: boolean
+  }
 }
 
 export const DEFAULT_SETTINGS: HudSettings = {
   minimap: { visible: true },
   speed:   { visible: true, showLimit: true },
   route:   { profile: 'standard', avoidHighways: false, avoidTolls: false, gravel: false },
+  clock:   { use24h: new Intl.DateTimeFormat([], { hour: 'numeric' }).resolvedOptions().hour12 === false },
 }
 
 // ── Persistent storage: localStorage + cookie fallback ────────────────────────
