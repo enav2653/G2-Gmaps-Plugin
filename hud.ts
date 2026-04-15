@@ -96,6 +96,7 @@ export function buildBannerText(
   stepIdx: number,
   state: NavState,
   liveDistM?: number,
+  use24h = false,
 ): string {
   if (state === 'idle')        return 'G2 Maps\nSet a destination'
   if (state === 'passive')     return 'No destination set\n '
@@ -110,7 +111,7 @@ export function buildBannerText(
   const dist       = formatDistance(liveDistM ?? step.distanceMeters)
   const totalSecs  = steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0)
   const eta        = formatETA(totalSecs)
-  const arrival    = formatClockTime(new Date(Date.now() + totalSecs * 1000))
+  const arrival    = formatClockTime(new Date(Date.now() + totalSecs * 1000), use24h)
 
   return `${instr}\n${dist}  •  ${stepIdx + 1}/${steps.length}  •  ${eta}  ${arrival}`
 }
