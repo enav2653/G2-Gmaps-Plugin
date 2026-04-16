@@ -258,15 +258,16 @@ export function buildSpeedContainer(
 ): TextContainerProperty | null {
   if (!settings.speed.visible || !content.trim()) return null
 
-  // Width sized to fit "mph" + padding comfortably
+  // Start at minimap top so 4-line speed+limit content never overflows
   const containerW = 56
-  const containerH = BOTTOM_H
+  const containerY = MINIMAP_Y
+  const containerH = CANVAS_H - MINIMAP_Y   // 124 px — same height as minimap image
 
   return new TextContainerProperty({
     containerID:   CID.SPEED,
     containerName: 'speed',
     xPosition:     CANVAS_W - containerW - SPD_RIGHT_MARGIN,
-    yPosition:     BOTTOM_Y,
+    yPosition:     containerY,
     width:         containerW,
     height:        containerH,
     borderWidth:   0,

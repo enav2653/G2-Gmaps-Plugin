@@ -699,24 +699,32 @@ function effectiveStepIdx(): number {
 }
 
 /** Advance past any step whose endpoint we've entered.
- *  Threshold scales with speed but is also capped at 40% of the step's own
- *  distance, so short interchange/ramp steps don't trigger prematurely when
- *  the speed-based radius exceeds the step length itself.
- *    20 mph → ~60 m   40 mph → ~120 m   60 mph → ~180 m  (before step cap) */
+ *  Fixed 30 m radius — purely maneuver-based, not speed-scaled.
+ *  Capped at 40% of the step's own length so very short ramp/interchange
+ *  steps don't trigger prematurely. */
 function advanceStep(lat: number, lng: number): number {
   for (let i = stepIdx; i < steps.length - 1; i++) {
     const s = steps[i]
     if (!s.endLat && !s.endLng) continue  // missing coordinates — skip
-    const threshold = Math.min(
-      Math.max(30, speedMph * 3.0),        // speed-scaled lookahead, floor 30 m
-      Math.max(30, s.distanceMeters * 0.4) // cap at 40% of this step's length
-    )
+    const threshold = Math.min(30, s.distanceMeters * 0.4)
     if (haversine(lat, lng, s.endLat, s.endLng) < threshold) return i + 1
   }
   return stepIdx
 }
 
 // ─── Rerouting ────────────────────────────────────────────────────────────────
+
+/** Project a point distM metres from (lat, lng) along headingDeg. */
+function projectPoint(lat: number, lng: number, headingDeg: number, distM: number): { lat: number; lng: number } {
+  const R  = 6371000
+  const δ  = distM / R
+  const θ  = headingDeg * Math.PI / 180
+  const φ1 = lat * Math.PI / 180
+  const λ1 = lng * Math.PI / 180
+  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ))
+  const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2))
+  return { lat: φ2 * 180 / Math.PI, lng: λ2 * 180 / Math.PI }
+}
 
 async function reroute() {
   if (rerouteInProgress) return
@@ -726,7 +734,15 @@ async function reroute() {
     const raw = sessionStorage.getItem('g2maps_destination')
     if (!raw) return
     const dest = JSON.parse(raw) as { lat: number; lng: number }
-    steps   = await getRoute({ lat: currentLat, lng: currentLng }, dest, settings.route)
+
+    // Project 150 m ahead in the current travel direction so the router
+    // doesn't immediately send us back to the missed turn.
+    const heading = gpsHeadingDeg ?? deviceHeadingDeg
+    const origin  = (heading !== null && speedMph > 5)
+      ? projectPoint(currentLat, currentLng, heading, 150)
+      : { lat: currentLat, lng: currentLng }
+
+    steps   = await getRoute(origin, dest, settings.route)
     stepIdx = 0
     previewStepIdx = null
     reportStatus(`rerouted: ${steps.length} steps`)
