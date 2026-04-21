@@ -178,14 +178,22 @@ function renderPixels(
     const s = steps[i]
     const past    = i < stepIdx
     const current = i === stepIdx
-    const v       = past ? 50 : current ? 240 : 130
-    const thick   = current
 
     const pts: Array<[number, number]> = s.polylinePoints.length >= 2
       ? s.polylinePoints
       : (s.startLat || s.startLng) && (s.endLat || s.endLng)
         ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
         : []
+
+    // Past steps that still have points inside the minimap viewport stay bright
+    // and thick until they fully scroll off, giving a smooth trail after each maneuver.
+    const inView = past && pts.some(([plat, plng]) => {
+      const [px, py] = toPixel(plat, plng)
+      return px >= 0 && px < w && py >= 0 && py < h
+    })
+
+    const v     = current ? 240 : inView ? 200 : past ? 50 : 130
+    const thick = current || inView
 
     if (current && pts.length >= 2) {
       // Split the current step at the nearest polyline point to the user.

@@ -258,10 +258,10 @@ export function buildSpeedContainer(
 ): TextContainerProperty | null {
   if (!settings.speed.visible || !content.trim()) return null
 
-  // Start at minimap top so 4-line speed+limit content never overflows
+  // Tall container anchored below the banner — plenty of room for 4-line speed+limit content
   const containerW = 56
-  const containerY = MINIMAP_Y
-  const containerH = CANVAS_H - MINIMAP_Y   // 124 px — same height as minimap image
+  const containerY = BANNER_H                 // 80 — right below the banner strip
+  const containerH = CANVAS_H - BANNER_H      // 208 px
 
   return new TextContainerProperty({
     containerID:   CID.SPEED,
