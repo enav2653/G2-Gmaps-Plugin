@@ -59,7 +59,8 @@ const CLOCK_W = 100
 // Media container — bottom strip between minimap and speed
 const MEDIA_PAD = 28
 const MEDIA_X   = MAP_PAD_L + MINIMAP_IMG_W + MEDIA_PAD          // 130
-const MEDIA_W   = CANVAS_W - MEDIA_X - (56 + SPD_RIGHT_MARGIN + MEDIA_PAD)  // 376
+const SPD_W     = 72
+const MEDIA_W   = CANVAS_W - MEDIA_X - (SPD_W + SPD_RIGHT_MARGIN + MEDIA_PAD)
 
 // ─── Container IDs ───────────────────────────────────────────────────────────
 
@@ -258,10 +259,9 @@ export function buildSpeedContainer(
 ): TextContainerProperty | null {
   if (!settings.speed.visible || !content.trim()) return null
 
-  // Tall container anchored below the banner — plenty of room for 4-line speed+limit content
-  const containerW = 72
-  const containerY = BANNER_H                 // 80 — right below the banner strip
-  const containerH = CANVAS_H - BANNER_H      // 208 px
+  const containerW = SPD_W
+  const containerH = 80   // fits 3 lines (SPD / MPH / LIM) at standard font size
+  const containerY = MINIMAP_Y + MINIMAP_IMG_H / 2 - containerH / 2  // vertically centred with minimap
 
   return new TextContainerProperty({
     containerID:   CID.SPEED,
