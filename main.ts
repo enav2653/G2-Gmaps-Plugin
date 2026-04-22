@@ -1042,8 +1042,17 @@ function startCompass() {
 
 function setupInput() {
   bridge.onEvenHubEvent(async event => {
-    // Log every raw event so we can identify what double-tap actually sends
-    reportStatus(`raw event: ${JSON.stringify(event).slice(0, 120)}`)
+    // Handle system events (foreground resume)
+    const sys = event.sysEvent
+    if (sys) {
+      if (sys.eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT) {
+        refreshBanner()
+        refreshSpeed()
+        refreshMinimap()
+        if (mediaPlaying) refreshMedia()
+      }
+      return
+    }
 
     const e = event.textEvent
     if (!e) return
@@ -1054,7 +1063,6 @@ function setupInput() {
       case OsEventTypeList.CLICK_EVENT:
       case undefined: {
         if (navState === 'paused') {
-          // Tap to resume from paused state
           navState = 'navigating'
           await buildPage()
           return
@@ -1067,7 +1075,6 @@ function setupInput() {
 
       // Double tap — invoke the standard EvenHub exit dialog from any state
       case OsEventTypeList.DOUBLE_CLICK_EVENT: {
-        reportStatus('double-tap: requesting exit dialog')
         try {
           await (bridge as any).shutDownPageContainer(1)
         } catch (err) {
@@ -1296,16 +1303,7 @@ async function init() {
   setupInput()
   startCompass()
 
-  bridge.onEvenHubEvent(event => {
-    const sys = event.sysEvent
-    if (!sys) return
-    if (sys.eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT) {
-      refreshBanner()
-      refreshSpeed()
-      refreshMinimap()
-      if (mediaPlaying) refreshMedia()
-    }
-  })
+
 
   await buildPage()
 
