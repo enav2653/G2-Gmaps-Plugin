@@ -56,6 +56,9 @@ let currentLat = 0
 let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
+let speedingStartMs: number | null = null
+let limitFlashOn    = true
+let limitFlashTimer: ReturnType<typeof setInterval> | null = null
 let watchId:    number | null = null
 let pageCreated     = false
 let buildingPage    = false  // serialises concurrent buildPage calls
@@ -351,7 +354,9 @@ async function pollLocation() {
   currentLng = loc.lng
 
   // Fetch speed limit — cached by road segment, degrades gracefully on 403
-  getSpeedLimitMph(loc.lat, loc.lng).then(l => { limitMph = l }).catch(() => {})
+  getSpeedLimitMph(loc.lat, loc.lng).then(l => {
+    if (l !== limitMph) { limitMph = l; refreshSpeed() }
+  }).catch(() => {})
 
   // ─── Media state ──────────────────────────────────────────────────────────
   const prevMediaPlaying = mediaPlaying
@@ -781,7 +786,7 @@ async function buildPage() {
       ? haversine(currentLat, currentLng, steps[esi].endLat, steps[esi].endLng)
       : undefined
     const bannerContent = buildBannerText(steps, esi, navState, liveDistM, settings.clock?.use24h)
-    const speedContent  = buildSpeedText(speedMph, limitMph, settings)
+    const speedContent  = buildSpeedText(speedMph, limitMph, settings, limitFlashOn)
 
     const textContainers: TextContainerProperty[] = [buildEventContainer()]
     if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent))
@@ -860,9 +865,34 @@ async function refreshTime() {
   }))
 }
 
+function startLimitFlash() {
+  if (limitFlashTimer !== null) return
+  limitFlashTimer = setInterval(() => {
+    limitFlashOn = !limitFlashOn
+    refreshSpeed()
+  }, 500)
+}
+
+function stopLimitFlash() {
+  if (limitFlashTimer !== null) { clearInterval(limitFlashTimer); limitFlashTimer = null }
+  limitFlashOn = true
+}
+
+function updateLimitFlash() {
+  const overLimit = limitMph !== null && speedMph > limitMph
+  if (overLimit) {
+    if (speedingStartMs === null) speedingStartMs = Date.now()
+    if (Date.now() - speedingStartMs >= 5000) startLimitFlash()
+  } else {
+    speedingStartMs = null
+    stopLimitFlash()
+  }
+}
+
 async function refreshSpeed() {
   if (!settings.speed.visible) return
-  const content = buildSpeedText(speedMph, limitMph, settings)
+  updateLimitFlash()
+  const content = buildSpeedText(speedMph, limitMph, settings, limitFlashOn)
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.SPEED,
     containerName: 'speed',
@@ -1137,6 +1167,7 @@ export async function menuPassiveMode() {
 export async function menuEndNavigation() {
   stopGPS()
   stopAndroidPoll()
+  stopLimitFlash()
   resetSpeedLimitCache()
   limitMph = null
   steps    = []
@@ -1194,7 +1225,7 @@ export function getHudState() {
   return {
     bannerText:     buildBannerText(steps, esi, navState, liveDistM, settings.clock?.use24h),
     bannerVisible:  bannerMode !== 'always-off',
-    speedText:      buildSpeedText(speedMph, limitMph, settings),
+    speedText:      buildSpeedText(speedMph, limitMph, settings, limitFlashOn),
     speedVisible:   settings.speed.visible,
     mediaText:      mediaPlaying ? buildMediaText(mediaTitle, mediaArtist) : '',
     mediaPlaying,
@@ -1213,6 +1244,7 @@ export async function reloadSettings() {
 export async function startNavigation() {
   stopGPS()
   stopAndroidPoll()
+  stopLimitFlash()
   resetSpeedLimitCache()
   limitMph = null
 

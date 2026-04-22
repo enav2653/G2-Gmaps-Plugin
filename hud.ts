@@ -126,16 +126,16 @@ export function buildSpeedText(
   speedMph: number,
   limitMph: number | null,
   settings: HudSettings,
+  limitVisible = true,
 ): string {
   if (!settings.speed.visible) return ''
 
   const spd   = Math.round(speedMph).toString()
-  const unit  = 'mph'
-  const limit = settings.speed.showLimit && limitMph !== null
-    ? `\nlim\n${Math.round(limitMph)}`
+  const limit = settings.speed.showLimit && limitMph !== null && limitVisible
+    ? `\nLIM ${Math.round(limitMph)}`
     : ''
 
-  return `${spd}\n${unit}${limit}`
+  return `SPD ${spd}\n  MPH${limit}`
 }
 
 // ─── Container builders ───────────────────────────────────────────────────────
@@ -259,7 +259,7 @@ export function buildSpeedContainer(
   if (!settings.speed.visible || !content.trim()) return null
 
   // Tall container anchored below the banner — plenty of room for 4-line speed+limit content
-  const containerW = 56
+  const containerW = 72
   const containerY = BANNER_H                 // 80 — right below the banner strip
   const containerH = CANVAS_H - BANNER_H      // 208 px
 
