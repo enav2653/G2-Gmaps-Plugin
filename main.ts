@@ -1042,26 +1042,25 @@ function startCompass() {
 
 function setupInput() {
   bridge.onEvenHubEvent(async event => {
-    // Handle system events (foreground resume)
-    const sys = event.sysEvent
-    if (sys) {
-      if (sys.eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT) {
+    // Tap/swipe events arrive as sysEvent on G2 hardware; textEvent is a fallback.
+    const eventObj  = event.sysEvent ?? event.textEvent
+    const eventType = eventObj?.eventType
+
+    switch (eventType) {
+
+      // Foreground resume
+      case OsEventTypeList.FOREGROUND_ENTER_EVENT: {
         refreshBanner()
         refreshSpeed()
         refreshMinimap()
         if (mediaPlaying) refreshMedia()
+        return
       }
-      return
-    }
 
-    const e = event.textEvent
-    if (!e) return
-
-    switch (e.eventType) {
-
-      // Single tap — cycle banner mode
+      // Single tap — cycle banner mode / resume from pause
       case OsEventTypeList.CLICK_EVENT:
       case undefined: {
+        if (!eventObj) return  // no event data — ignore
         if (navState === 'paused') {
           navState = 'navigating'
           await buildPage()
@@ -1076,7 +1075,7 @@ function setupInput() {
       // Double tap — invoke the standard EvenHub exit dialog from any state
       case OsEventTypeList.DOUBLE_CLICK_EVENT: {
         try {
-          await (bridge as any).shutDownPageContainer(1)
+          await bridge.shutDownPageContainer(1)
         } catch (err) {
           reportStatus(`exit dialog error: ${String(err)}`)
         }
