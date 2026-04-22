@@ -1042,6 +1042,9 @@ function startCompass() {
 
 function setupInput() {
   bridge.onEvenHubEvent(async event => {
+    // Log every raw event so we can identify what double-tap actually sends
+    reportStatus(`raw event: ${JSON.stringify(event).slice(0, 120)}`)
+
     const e = event.textEvent
     if (!e) return
 
