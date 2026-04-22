@@ -1045,6 +1045,9 @@ function setupInput() {
     // Tap/swipe events arrive as sysEvent on G2 hardware; textEvent is a fallback.
     const eventObj  = event.sysEvent ?? event.textEvent
     const eventType = eventObj?.eventType
+    const channel   = event.sysEvent ? 'sys' : event.textEvent ? 'txt' : 'none'
+
+    reportStatus(`ev type=${eventType ?? 'undef'} ch=${channel}`)
 
     switch (eventType) {
 
@@ -1074,8 +1077,10 @@ function setupInput() {
 
       // Double tap — invoke the standard EvenHub exit dialog from any state
       case OsEventTypeList.DOUBLE_CLICK_EVENT: {
+        reportStatus('double-tap: calling shutDownPageContainer(1)')
         try {
-          await bridge.shutDownPageContainer(1)
+          const ok = await bridge.shutDownPageContainer(1)
+          reportStatus(`shutDown result: ${ok}`)
         } catch (err) {
           reportStatus(`exit dialog error: ${String(err)}`)
         }

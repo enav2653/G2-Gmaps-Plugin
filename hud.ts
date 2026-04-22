@@ -132,7 +132,7 @@ export function buildSpeedText(
   const spd   = Math.round(speedMph).toString()
   const unit  = 'mph'
   const limit = settings.speed.showLimit && limitMph !== null
-    ? `\n─────\n${Math.round(limitMph)}`
+    ? `\nlim\n${Math.round(limitMph)}`
     : ''
 
   return `${spd}\n${unit}${limit}`
