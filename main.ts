@@ -1062,10 +1062,15 @@ function setupInput() {
         break
       }
 
-      // Double tap — open menu (rendered on phone side, result sent back via sessionStorage event)
+      // Double tap — exit dialog on root page; menu elsewhere
       case OsEventTypeList.DOUBLE_CLICK_EVENT: {
-        // Signal the phone UI to show the menu
-        window.dispatchEvent(new CustomEvent('g2maps:showmenu'))
+        if (navState === 'idle') {
+          // Root page: invoke the standard EvenHub exit dialog per platform UX guidelines
+          await (bridge as any).shutDownPageContainer(1)
+        } else {
+          // During navigation: open phone-side menu
+          window.dispatchEvent(new CustomEvent('g2maps:showmenu'))
+        }
         break
       }
 
