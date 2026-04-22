@@ -1064,7 +1064,12 @@ function setupInput() {
 
       // Double tap — invoke the standard EvenHub exit dialog from any state
       case OsEventTypeList.DOUBLE_CLICK_EVENT: {
-        await (bridge as any).shutDownPageContainer(1)
+        reportStatus('double-tap: requesting exit dialog')
+        try {
+          await (bridge as any).shutDownPageContainer(1)
+        } catch (err) {
+          reportStatus(`exit dialog error: ${String(err)}`)
+        }
         break
       }
 
