@@ -1062,15 +1062,9 @@ function setupInput() {
         break
       }
 
-      // Double tap — exit dialog on root page; menu elsewhere
+      // Double tap — invoke the standard EvenHub exit dialog from any state
       case OsEventTypeList.DOUBLE_CLICK_EVENT: {
-        if (navState === 'idle') {
-          // Root page: invoke the standard EvenHub exit dialog per platform UX guidelines
-          await (bridge as any).shutDownPageContainer(1)
-        } else {
-          // During navigation: open phone-side menu
-          window.dispatchEvent(new CustomEvent('g2maps:showmenu'))
-        }
+        await (bridge as any).shutDownPageContainer(1)
         break
       }
 
