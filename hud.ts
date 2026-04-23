@@ -128,8 +128,7 @@ export function buildBannerText(
 // ─── Speed block text ─────────────────────────────────────────────────────────
 //
 // The G2 has no sub-pixel layout, so we compose the speed block as a
-// right-aligned text container. Characters are ~8px wide at default font.
-// We right-pad with spaces to right-align within the container.
+// right-aligned text container. Characters are ~16 px wide at default font.
 
 export function buildSpeedText(
   speedMph: number,
@@ -139,9 +138,9 @@ export function buildSpeedText(
 ): string {
   if (!settings.speed.visible) return ''
 
-  const spd   = Math.round(speedMph).toString()
+  const spd   = Math.round(speedMph).toString().padStart(3)
   const limit = settings.speed.showLimit && limitMph !== null && limitVisible
-    ? `\n${Math.round(limitMph)}`
+    ? `\n${Math.round(limitMph).toString().padStart(3)}`
     : ''
 
   return `${spd}\nMPH${limit}`
