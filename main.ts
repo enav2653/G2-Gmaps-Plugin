@@ -114,6 +114,7 @@ let deviceHeadingCos = 1
 // compassBiasCnf grows toward 1 as GPS calibrates; decays ~1 hr half-life without updates.
 let compassBias    = 0
 let compassBiasCnf = 0
+let compassLastEventMs = 0   // timestamp of last DeviceOrientationEvent; 0 = never
 
 // ─── Initial compass calibration (figure-8 motion) ───────────────────────────
 // On first run, the user is guided through a figure-8 motion to seed the
@@ -619,7 +620,11 @@ async function finishCalibration() {
  */
 function activeHeadingDeg(): number {
   if (speedMph >= 5 && gpsHeadingDeg !== null) return gpsHeadingDeg
-  if (deviceHeadingDeg !== null) {
+  // Treat the compass as stale if no event has arrived in the last 2 s —
+  // this happens when the phone screen turns off and the WebView suspends
+  // DeviceOrientationEvent delivery. Fall back to GPS heading instead.
+  const compassFresh = compassLastEventMs > 0 && (Date.now() - compassLastEventMs) < 2000
+  if (deviceHeadingDeg !== null && compassFresh) {
     if (compassBiasCnf <= 0) return deviceHeadingDeg
     // Corrected heading = deviceHeading + bias; blend toward raw at low confidence
     const corrected = ((deviceHeadingDeg + compassBias) % 360 + 360) % 360
@@ -630,6 +635,7 @@ function activeHeadingDeg(): number {
     const cosH = c * Math.cos(cR) + (1 - c) * Math.cos(rR)
     return ((Math.atan2(sinH, cosH) * 180 / Math.PI) + 360) % 360
   }
+  if (gpsHeadingDeg !== null) return gpsHeadingDeg
   return 0
 }
 
@@ -1043,6 +1049,7 @@ function startCompass() {
 
   const onOrientation = (e: DeviceOrientationEvent) => {
     if (e.alpha === null) return
+    compassLastEventMs = Date.now()
     // alpha follows W3C convention: positive = CCW. Convert to CW compass bearing.
     const rad = (360 - e.alpha) * Math.PI / 180
     deviceHeadingSin = ALPHA * Math.sin(rad) + (1 - ALPHA) * deviceHeadingSin
