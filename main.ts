@@ -21,9 +21,11 @@ import {
   buildMinimapImageContainers,
   MAP_TILE_CIDS,
   buildSpeedContainer,
+  buildSpeedLabelContainer,
   buildTimeContainer,
   buildBannerText,
   buildSpeedText,
+  buildSpeedLabelText,
   buildMediaText,
   buildMediaContainer,
   BANNER_MODES, BannerMode,
@@ -787,9 +789,12 @@ async function buildPage() {
       : undefined
     const bannerContent = buildBannerText(steps, esi, navState, liveDistM, settings.clock?.use24h)
     const speedContent  = buildSpeedText(speedMph, limitMph, settings, limitFlashOn)
+    const speedLblText  = buildSpeedLabelText(settings, limitMph, limitFlashOn)
 
     const textContainers: TextContainerProperty[] = [buildEventContainer()]
     if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent))
+    const speedLblContainer = buildSpeedLabelContainer(speedLblText, settings)
+    if (speedLblContainer) textContainers.push(speedLblContainer)
     const speedContainer = buildSpeedContainer(speedContent, settings)
     if (speedContainer) textContainers.push(speedContainer)
     if (mediaPlaying) {
@@ -892,13 +897,21 @@ function updateLimitFlash() {
 async function refreshSpeed() {
   if (!settings.speed.visible) return
   updateLimitFlash()
-  const content = buildSpeedText(speedMph, limitMph, settings, limitFlashOn)
+  const lblContent = buildSpeedLabelText(settings, limitMph, limitFlashOn)
+  const valContent = buildSpeedText(speedMph, limitMph, settings, limitFlashOn)
+  await bridge.textContainerUpgrade(new TextContainerUpgrade({
+    containerID:   CID.SPEED_LBL,
+    containerName: 'spd_lbl',
+    content:       lblContent,
+    contentOffset: 0,
+    contentLength: lblContent.length,
+  }))
   await bridge.textContainerUpgrade(new TextContainerUpgrade({
     containerID:   CID.SPEED,
     containerName: 'speed',
-    content,
+    content:       valContent,
     contentOffset: 0,
-    contentLength: content.length,
+    contentLength: valContent.length,
   }))
 }
 

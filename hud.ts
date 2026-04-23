@@ -52,24 +52,27 @@ const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
+const SPD_W     = 72   // total width (label col + value col)
+const SPD_LBL_W = 36   // left col: "SPD" / "LIM" labels
+// SPD_VAL_W = SPD_W - SPD_LBL_W = 36
 
 // Clock container — top-right corner
 const CLOCK_W = 100
 
 // Media container — bottom strip between minimap and speed
 const MEDIA_PAD = 28
-const MEDIA_X   = MAP_PAD_L + MINIMAP_IMG_W + MEDIA_PAD          // 130
-const SPD_W     = 72
+const MEDIA_X   = MAP_PAD_L + MINIMAP_IMG_W + MEDIA_PAD
 const MEDIA_W   = CANVAS_W - MEDIA_X - (SPD_W + SPD_RIGHT_MARGIN + MEDIA_PAD)
 
 // ─── Container IDs ───────────────────────────────────────────────────────────
 
 export const CID = {
-  EVENT:  1,
-  BANNER: 2,
-  SPEED:  4,
-  MEDIA:  8,
-  CLOCK:  9,
+  EVENT:     1,
+  BANNER:    2,
+  SPEED_LBL: 10,
+  SPEED:     4,
+  MEDIA:     8,
+  CLOCK:     9,
 } as const
 
 // 4 tile IDs for the 2×2 minimap grid (row-major, left-to-right top-to-bottom)
@@ -136,14 +139,22 @@ export function buildSpeedText(
 ): string {
   if (!settings.speed.visible) return ''
 
-  // Pad numbers to 3 chars so every line is the same total width,
-  // keeping SPD/LIM labels pinned to the left regardless of digit count.
-  const spd   = Math.round(speedMph).toString().padStart(3)
+  const spd   = Math.round(speedMph).toString()
   const limit = settings.speed.showLimit && limitMph !== null && limitVisible
-    ? `\nLIM ${Math.round(limitMph).toString().padStart(3)}`
+    ? `\n${Math.round(limitMph)}`
     : ''
 
-  return `SPD ${spd}\n    MPH${limit}`
+  return `${spd}\nMPH${limit}`
+}
+
+export function buildSpeedLabelText(
+  settings: HudSettings,
+  limitMph: number | null,
+  limitVisible: boolean,
+): string {
+  if (!settings.speed.visible) return ''
+  const showLimit = settings.speed.showLimit && limitMph !== null && limitVisible
+  return showLimit ? 'SPD\n\nLIM' : 'SPD'
 }
 
 // ─── Container builders ───────────────────────────────────────────────────────
@@ -259,27 +270,47 @@ export function buildTimeContainer(content: string): TextContainerProperty {
   })
 }
 
-/** Speed stack text container — bottom-right. Returns null if hidden. */
+const SPD_X   = CANVAS_W - SPD_W - SPD_RIGHT_MARGIN  // left edge of speed block
+const SPD_H   = 80                                    // fits 3 lines at standard font
+const SPD_Y   = MINIMAP_Y + MINIMAP_IMG_H / 2 - SPD_H / 2  // centred with minimap
+
+/** Label column (SPD / LIM) — left half of the speed block. Returns null if hidden. */
+export function buildSpeedLabelContainer(
+  content: string,
+  settings: HudSettings,
+): TextContainerProperty | null {
+  if (!settings.speed.visible || !content) return null
+  return new TextContainerProperty({
+    containerID:   CID.SPEED_LBL,
+    containerName: 'spd_lbl',
+    xPosition:     SPD_X,
+    yPosition:     SPD_Y,
+    width:         SPD_LBL_W,
+    height:        SPD_H,
+    borderWidth:   0,
+    borderColor:   0,
+    paddingLength: 2,
+    content,
+    isEventCapture: 0,
+  })
+}
+
+/** Value column (number / MPH / limit) — right half of the speed block. Returns null if hidden. */
 export function buildSpeedContainer(
   content: string,
   settings: HudSettings,
 ): TextContainerProperty | null {
   if (!settings.speed.visible || !content.trim()) return null
-
-  const containerW = SPD_W
-  const containerH = 80   // fits 3 lines (SPD / MPH / LIM) at standard font size
-  const containerY = MINIMAP_Y + MINIMAP_IMG_H / 2 - containerH / 2  // vertically centred with minimap
-
   return new TextContainerProperty({
     containerID:   CID.SPEED,
     containerName: 'speed',
-    xPosition:     CANVAS_W - containerW - SPD_RIGHT_MARGIN,
-    yPosition:     containerY,
-    width:         containerW,
-    height:        containerH,
+    xPosition:     SPD_X + SPD_LBL_W,
+    yPosition:     SPD_Y,
+    width:         SPD_W - SPD_LBL_W,
+    height:        SPD_H,
     borderWidth:   0,
     borderColor:   0,
-    paddingLength: 4,
+    paddingLength: 2,
     content,
     isEventCapture: 0,
   })
