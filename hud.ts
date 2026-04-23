@@ -136,12 +136,14 @@ export function buildSpeedText(
 ): string {
   if (!settings.speed.visible) return ''
 
-  const spd   = Math.round(speedMph).toString()
+  // Pad numbers to 3 chars so every line is the same total width,
+  // keeping SPD/LIM labels pinned to the left regardless of digit count.
+  const spd   = Math.round(speedMph).toString().padStart(3)
   const limit = settings.speed.showLimit && limitMph !== null && limitVisible
-    ? `\nLIM ${Math.round(limitMph)}`
+    ? `\nLIM ${Math.round(limitMph).toString().padStart(3)}`
     : ''
 
-  return `SPD ${spd}\n  MPH${limit}`
+  return `SPD ${spd}\n    MPH${limit}`
 }
 
 // ─── Container builders ───────────────────────────────────────────────────────
