@@ -52,9 +52,9 @@ const        MINIMAP_Y       = CANVAS_H - MINIMAP_IMG_H       // 164 — bottom-
 
 // Speed stack right margin
 const SPD_RIGHT_MARGIN = 8
-const SPD_W     = 72   // total width (label col + value col)
-const SPD_LBL_W = 36   // left col: "SPD" / "LIM" labels
-// SPD_VAL_W = SPD_W - SPD_LBL_W = 36
+const SPD_W     = 112  // total width — 56 px per column at ~16 px/char font
+const SPD_LBL_W = 56   // left col: "SPD" / "LIM" labels
+// SPD_VAL_W = SPD_W - SPD_LBL_W = 56
 
 // Clock container — top-right corner
 const CLOCK_W = 100
@@ -271,8 +271,8 @@ export function buildTimeContainer(content: string): TextContainerProperty {
 }
 
 const SPD_X   = CANVAS_W - SPD_W - SPD_RIGHT_MARGIN  // left edge of speed block
-const SPD_H   = 80                                    // fits 3 lines at standard font
-const SPD_Y   = MINIMAP_Y + MINIMAP_IMG_H / 2 - SPD_H / 2  // centred with minimap
+const SPD_H   = MINIMAP_IMG_H                         // 124 px — matches minimap height, no scrollbar
+const SPD_Y   = MINIMAP_Y                             // top-aligned with minimap
 
 /** Label column (SPD / LIM) — left half of the speed block. Returns null if hidden. */
 export function buildSpeedLabelContainer(
