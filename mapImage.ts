@@ -176,8 +176,10 @@ function renderPixels(
   // ── Route segments ────────────────────────────────────────────────────────────
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i]
-    const past    = i < stepIdx
-    const current = i === stepIdx
+    const past     = i < stepIdx
+    const current  = i === stepIdx
+    const prevStep = i === stepIdx - 1
+    const nextStep = i === stepIdx + 1
 
     const pts: Array<[number, number]> = s.polylinePoints.length >= 2
       ? s.polylinePoints
@@ -185,15 +187,8 @@ function renderPixels(
         ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
         : []
 
-    // Past steps that still have points inside the minimap viewport stay bright
-    // and thick until they fully scroll off, giving a smooth trail after each maneuver.
-    const inView = past && pts.some(([plat, plng]) => {
-      const [px, py] = toPixel(plat, plng)
-      return px >= 0 && px < w && py >= 0 && py < h
-    })
-
-    const v     = current ? 240 : inView ? 200 : past ? 50 : 130
-    const thick = current || inView
+    const v     = current ? 240 : prevStep ? 200 : nextStep ? 160 : past ? 40 : 80
+    const thick = current || prevStep
 
     if (current && pts.length >= 2) {
       // Split the current step at the nearest polyline point to the user.
@@ -234,7 +229,7 @@ function renderPixels(
           ? [[ns.startLat, ns.startLng], [ns.endLat, ns.endLng]]
           : []
       if (np.length > 0) {
-        const nv  = i + 1 < stepIdx ? 50 : i + 1 === stepIdx ? 240 : 130
+        const nv  = i + 1 < stepIdx - 1 ? 40 : i + 1 === stepIdx - 1 ? 200 : i + 1 === stepIdx ? 240 : i + 1 === stepIdx + 1 ? 160 : 80
         const [px0, py0] = toPixel(pts[pts.length - 1][0], pts[pts.length - 1][1])
         const [px1, py1] = toPixel(np[0][0], np[0][1])
         drawLine(px0, py0, px1, py1, Math.min(v, nv), false)
@@ -317,10 +312,10 @@ function renderPixels(
       for (let col = 0; col < 9; col++)
         if (shape[row][col]) {
           // Each logical pixel → 2×2 block; centre (col 4, row 3) → (posX, posY)
-          forcePixel(posX + col*2 - 8, posY + row*2 - 6, PV)
-          forcePixel(posX + col*2 - 7, posY + row*2 - 6, PV)
-          forcePixel(posX + col*2 - 8, posY + row*2 - 5, PV)
-          forcePixel(posX + col*2 - 7, posY + row*2 - 5, PV)
+          setPixel(posX + col*2 - 8, posY + row*2 - 6, PV)
+          setPixel(posX + col*2 - 7, posY + row*2 - 6, PV)
+          setPixel(posX + col*2 - 8, posY + row*2 - 5, PV)
+          setPixel(posX + col*2 - 7, posY + row*2 - 5, PV)
         }
   }
 

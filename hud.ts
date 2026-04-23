@@ -150,7 +150,7 @@ export function buildSpeedText(
   if (!settings.speed.visible) return ''
 
   const spd   = rpad(Math.round(speedMph))
-  const limit = settings.speed.showLimit && limitMph !== null && limitVisible
+  const limit = settings.speed.showLimit && limitMph !== null
     ? `\n${rpad(Math.round(limitMph))}`
     : ''
 

@@ -881,7 +881,7 @@ function startLimitFlash() {
   limitFlashTimer = setInterval(() => {
     limitFlashOn = !limitFlashOn
     refreshSpeed()
-  }, 500)
+  }, 1000)
 }
 
 function stopLimitFlash() {
