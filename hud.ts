@@ -110,7 +110,12 @@ export function buildBannerText(
   const instrStep  = steps[stepIdx + 1] ?? step  // next maneuver; fallback on last step
   const instr      = formatInstruction(instrStep.instruction)
   const dist       = formatDistance(liveDistM ?? step.distanceMeters)
-  const totalSecs  = steps.slice(stepIdx).reduce((s, st) => s + st.durationSeconds, 0)
+
+  // Scale current step's duration by remaining fraction so ETA updates live
+  const remainingSecs = liveDistM !== undefined && step.distanceMeters > 0
+    ? step.durationSeconds * (liveDistM / step.distanceMeters)
+    : step.durationSeconds
+  const totalSecs  = remainingSecs + steps.slice(stepIdx + 1).reduce((s, st) => s + st.durationSeconds, 0)
   const eta        = formatETA(totalSecs)
   const arrival    = formatClockTime(new Date(Date.now() + totalSecs * 1000), use24h)
 
