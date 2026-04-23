@@ -133,9 +133,9 @@ export function buildBannerText(
 // the same visual width as double-digit numbers.
 
 function rpad(n: number): string {
-  if (n < 10)  return '00' + n   // 9   → "009"
-  if (n < 100) return '0'  + n   // 40  → "040"
-  return               '' + n    // 100 → "100"
+  if (n < 10)  return ' 00' + n   // 9   → " 009"
+  if (n < 100) return ' 0'  + n   // 40  → " 040"
+  return               ' '  + n   // 100 → " 100"
 }
 
 export function buildSpeedText(
