@@ -129,13 +129,12 @@ export function buildBannerText(
 //
 // The G2 has no sub-pixel layout, so we compose the speed block as a
 // right-aligned text container. Characters are ~16 px wide at default font.
-// Regular spaces are collapsed by the renderer; figure space U+2007 (same
-// width as a digit) is used for padding instead.
+// Leading spaces collapse, so single-digit numbers are zero-padded to keep
+// the same visual width as double-digit numbers.
 
-const FIGURE_SP = ' '
 function rpad(n: number): string {
-  const s = n.toString()
-  return FIGURE_SP.repeat(3 - s.length) + s
+  if (n < 10) return ' 0' + n   //  " 09" — if space collapses: "09" = same width as "40"
+  return ' ' + n                 //  " 40" / " 100"
 }
 
 export function buildSpeedText(
