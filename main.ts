@@ -792,7 +792,7 @@ async function buildPage() {
     const speedLblText  = buildSpeedLabelText(settings, limitMph, limitFlashOn)
 
     const textContainers: TextContainerProperty[] = [buildEventContainer()]
-    if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent))
+    if (bannerMode !== 'always-off') textContainers.push(buildBannerContainer(bannerContent, settings.clock?.use24h))
     const speedLblContainer = buildSpeedLabelContainer(speedLblText, settings)
     if (speedLblContainer) textContainers.push(speedLblContainer)
     const speedContainer = buildSpeedContainer(speedContent, settings)
@@ -804,7 +804,7 @@ async function buildPage() {
       ))
       if (mediaContainer) textContainers.push(mediaContainer)
     }
-    textContainers.push(buildTimeContainer(formatClockTime(undefined, settings.clock?.use24h)))
+    textContainers.push(buildTimeContainer(formatClockTime(undefined, settings.clock?.use24h), settings.clock?.use24h))
 
     const imageContainers: ImageContainerProperty[] = [
       ...buildMinimapImageContainers(settings),

@@ -56,8 +56,11 @@ const SPD_W     = 112  // total width — 56 px per column at ~16 px/char font
 const SPD_LBL_W = 56   // left col: "SPD" / "LIM" labels
 // SPD_VAL_W = SPD_W - SPD_LBL_W = 56
 
-// Clock container — top-right corner
-const CLOCK_W = 100
+// Clock container — top-right corner.
+// 24h "15:45" is shorter than 12h "3:45 PM", so use a narrower box in 24h mode.
+const CLOCK_W_12H = 104
+const CLOCK_W_24H = 68
+function clockW(use24h: boolean) { return use24h ? CLOCK_W_24H : CLOCK_W_12H }
 
 // Media container — bottom strip between minimap and speed
 const MEDIA_PAD = 28
@@ -184,13 +187,13 @@ export function buildEventContainer(): TextContainerProperty {
 }
 
 /** Banner text container — top strip. Width leaves room for clock in top-right. */
-export function buildBannerContainer(content: string): TextContainerProperty {
+export function buildBannerContainer(content: string, use24h = false): TextContainerProperty {
   return new TextContainerProperty({
     containerID:   CID.BANNER,
     containerName: 'banner',
     xPosition:     0,
     yPosition:     0,
-    width:         CANVAS_W - CLOCK_W,
+    width:         CANVAS_W - clockW(use24h),
     height:        BANNER_H,
     borderWidth:   0,
     borderColor:   0,
@@ -261,13 +264,14 @@ export function buildMediaContainer(content: string): TextContainerProperty | nu
 }
 
 /** Clock time container — top-right corner. Always present. */
-export function buildTimeContainer(content: string): TextContainerProperty {
+export function buildTimeContainer(content: string, use24h = false): TextContainerProperty {
+  const w = clockW(use24h)
   return new TextContainerProperty({
     containerID:   CID.CLOCK,
     containerName: 'clock',
-    xPosition:     CANVAS_W - CLOCK_W,
+    xPosition:     CANVAS_W - w,
     yPosition:     0,
-    width:         CLOCK_W,
+    width:         w,
     height:        40,
     borderWidth:   0,
     borderColor:   0,
