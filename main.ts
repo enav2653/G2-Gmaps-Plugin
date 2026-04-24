@@ -57,7 +57,6 @@ let currentLat = 0
 let currentLng = 0
 let speedMph   = 0
 let limitMph:  number | null = null
-let speedingStartMs: number | null = null
 let limitFlashOn    = true
 let limitFlashTimer: ReturnType<typeof setInterval> | null = null
 let watchId:    number | null = null
@@ -889,12 +888,9 @@ function stopLimitFlash() {
 }
 
 function updateLimitFlash() {
-  const overLimit = limitMph !== null && speedMph > limitMph
-  if (overLimit) {
-    if (speedingStartMs === null) speedingStartMs = Date.now()
-    if (Date.now() - speedingStartMs >= 5000) startLimitFlash()
+  if (limitMph !== null && speedMph > limitMph + 5) {
+    startLimitFlash()
   } else {
-    speedingStartMs = null
     stopLimitFlash()
   }
 }
