@@ -187,7 +187,7 @@ function renderPixels(
         ? [[s.startLat, s.startLng], [s.endLat, s.endLng]]
         : []
 
-    const v     = current ? 240 : prevStep ? 200 : nextStep ? 160 : past ? 40 : 80
+    const v     = current ? 240 : prevStep ? 200 : nextStep ? 240 : past ? 40 : 80
     const thick = current || prevStep
 
     if (current && pts.length >= 2) {
@@ -229,7 +229,7 @@ function renderPixels(
           ? [[ns.startLat, ns.startLng], [ns.endLat, ns.endLng]]
           : []
       if (np.length > 0) {
-        const nv  = i + 1 < stepIdx - 1 ? 40 : i + 1 === stepIdx - 1 ? 200 : i + 1 === stepIdx ? 240 : i + 1 === stepIdx + 1 ? 160 : 80
+        const nv  = i + 1 < stepIdx - 1 ? 40 : i + 1 === stepIdx - 1 ? 200 : i + 1 === stepIdx ? 240 : i + 1 === stepIdx + 1 ? 240 : 80
         const [px0, py0] = toPixel(pts[pts.length - 1][0], pts[pts.length - 1][1])
         const [px1, py1] = toPixel(np[0][0], np[0][1])
         drawLine(px0, py0, px1, py1, Math.min(v, nv), false)
@@ -298,7 +298,7 @@ function renderPixels(
   // Brightness = midpoint between current-step route (240) and background roads (40).
   {
     const [posX, posY] = toPixel(lat, lng)
-    const PV = 140
+    const PV = 255
     const shape = [
       [0,0,0,0,1,0,0,0,0],  // row 0  tip
       [0,0,0,1,1,1,0,0,0],  // row 1
@@ -312,10 +312,10 @@ function renderPixels(
       for (let col = 0; col < 9; col++)
         if (shape[row][col]) {
           // Each logical pixel → 2×2 block; centre (col 4, row 3) → (posX, posY)
-          setPixel(posX + col*2 - 8, posY + row*2 - 6, PV)
-          setPixel(posX + col*2 - 7, posY + row*2 - 6, PV)
-          setPixel(posX + col*2 - 8, posY + row*2 - 5, PV)
-          setPixel(posX + col*2 - 7, posY + row*2 - 5, PV)
+          forcePixel(posX + col*2 - 8, posY + row*2 - 6, PV)
+          forcePixel(posX + col*2 - 7, posY + row*2 - 6, PV)
+          forcePixel(posX + col*2 - 8, posY + row*2 - 5, PV)
+          forcePixel(posX + col*2 - 7, posY + row*2 - 5, PV)
         }
   }
 
