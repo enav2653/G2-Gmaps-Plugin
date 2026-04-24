@@ -238,6 +238,7 @@
 <div class="tabs">
   <div class="tab active" data-tab="nav">Navigate</div>
   <div class="tab" data-tab="settings">Settings</div>
+  <div class="tab" data-tab="setup">Setup</div>
   <div class="tab" data-tab="preview">Preview</div>
 </div>
 
@@ -406,18 +407,19 @@
     </label>
   </div>
 
-  <div class="settings-section">Diagnostics</div>
-
-  <div class="toggle-row">
-    <div class="toggle-info">
-      <div class="toggle-label">Debug log</div>
-      <div class="toggle-sub">Show status messages at bottom of screen</div>
+  <div id="debug-section" style="display:none">
+    <div class="settings-section">Diagnostics</div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Debug log</div>
+        <div class="toggle-sub">Show status messages at bottom of screen</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="debug-visible">
+        <div class="toggle-bg"></div>
+        <div class="toggle-thumb"></div>
+      </label>
     </div>
-    <label class="toggle">
-      <input type="checkbox" id="debug-visible">
-      <div class="toggle-bg"></div>
-      <div class="toggle-thumb"></div>
-    </label>
   </div>
 
   <div class="settings-section">Minimap</div>
@@ -474,6 +476,120 @@
     <button class="action-btn primary" id="save-btn">Save to glasses</button>
   </div>
   <div class="status" id="settings-status" style="border-top:none"></div>
+  <div class="bottom-pad"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     TAB 3 — Setup
+     ══════════════════════════════════════════ -->
+<div class="panel" id="panel-setup" style="overflow-y:auto">
+  <style>
+    .setup-section { padding:14px 16px 6px; font-size:10px; text-transform:uppercase;
+                     letter-spacing:0.08em; color:var(--muted); }
+    .setup-card    { margin:0 16px 12px; background:var(--surface);
+                     border:0.5px solid var(--border); border-radius:12px;
+                     padding:14px; font-size:13px; line-height:1.6; }
+    .setup-card h3 { font-size:13px; font-weight:600; margin-bottom:6px; color:var(--text); }
+    .setup-card p  { color:#b0b0c8; margin-bottom:8px; }
+    .setup-card p:last-child { margin-bottom:0; }
+    .setup-card ol,
+    .setup-card ul { padding-left:18px; color:#b0b0c8; }
+    .setup-card li { margin-bottom:4px; }
+    .setup-card code { font-family:monospace; font-size:11px; background:rgba(255,255,255,0.07);
+                       border-radius:4px; padding:1px 5px; color:var(--accent); }
+    .setup-card .note { font-size:11px; color:var(--muted); margin-top:8px; }
+    .setup-tag  { display:inline-block; font-size:10px; font-weight:600;
+                  padding:2px 7px; border-radius:10px; margin-bottom:6px; }
+    .setup-tag.optional  { background:rgba(55,138,221,0.15); color:var(--accent); }
+    .setup-tag.required  { background:rgba(74,222,128,0.12); color:var(--green); }
+    .setup-tag.android   { background:rgba(200,144,80,0.15); color:var(--amber); }
+  </style>
+
+  <!-- ── Google Maps API Key ─────────────────────────────────────── -->
+  <div class="setup-section">Google Maps API Key</div>
+  <div class="setup-card">
+    <span class="setup-tag optional">Optional</span>
+    <h3>What it enables</h3>
+    <p>Without a key the app uses free OpenStreetMap data (OSRM routing, Nominatim search). Adding a Google key upgrades to Google Routes and Places autocomplete — more accurate results and real-time traffic.</p>
+    <h3>How to get one</h3>
+    <ol>
+      <li>Go to <strong>console.cloud.google.com</strong> and create or select a project.</li>
+      <li>Enable these two APIs: <strong>Routes API</strong> and <strong>Places API (New)</strong>.</li>
+      <li>Go to <strong>APIs &amp; Services → Credentials → Create API Key</strong>.</li>
+      <li>Restrict the key to your Android app package (<code>com.enav2653.g2maps</code>) for security.</li>
+      <li>Paste the key in <strong>Settings → Google Maps API key</strong> and tap Save.</li>
+    </ol>
+    <p class="note">Google Maps has a free monthly credit (~$200). Light personal use typically stays within it.</p>
+  </div>
+
+  <!-- ── Stadia Maps API Key ────────────────────────────────────── -->
+  <div class="setup-section">Stadia Maps API Key</div>
+  <div class="setup-card">
+    <span class="setup-tag optional">Optional — Adventure mode only</span>
+    <h3>What it enables</h3>
+    <p>Required to use <strong>Adventure</strong> routing profile. Stadia hosts the open-source Valhalla engine with a motorcycle costing model that prefers backroads, avoids interstates, and can route over gravel.</p>
+    <h3>How to get one</h3>
+    <ol>
+      <li>Go to <strong>stadiamaps.com/create-api-key</strong> — no credit card required.</li>
+      <li>Create an account and generate a free API key (200 000 requests/month).</li>
+      <li>Paste the key in <strong>Settings → Adventure → Stadia Maps API key</strong> and tap Save.</li>
+    </ol>
+    <p class="note">Switch the routing profile to <em>Adventure</em> in Settings to activate it.</p>
+  </div>
+
+  <!-- ── Tasker GPS Bridge ──────────────────────────────────────── -->
+  <div class="setup-section">Tasker GPS Bridge</div>
+  <div class="setup-card">
+    <span class="setup-tag android">Android only</span>
+    <span class="setup-tag required" style="margin-left:4px">Recommended</span>
+    <h3>What it enables</h3>
+    <p>Without Tasker, the app falls back to the browser's GPS API — slower updates and stops when the screen turns off. Tasker runs a local HTTP server that feeds the app native Android GPS at full rate, even with the screen off.</p>
+    <h3>Requirements</h3>
+    <ul>
+      <li>Tasker 5.9 or later (paid app, Google Play)</li>
+      <li>Grant Tasker <strong>Location</strong> permission (precise, background)</li>
+      <li>Disable battery optimisation for Tasker</li>
+    </ul>
+    <h3>Step 1 — Create task: G2 Start Server</h3>
+    <ol>
+      <li>Tasker → Tasks tab → <strong>+</strong> → name it <em>G2 Start Server</em>.</li>
+      <li>Add action: <strong>Net → HTTP Server → Start</strong>, Port <code>7272</code>.</li>
+      <li>Add action: <strong>Variable Split</strong>, Variable <code>%LOC</code>, Splitter <code>,</code><br>
+          (creates <code>%LOC1</code> = latitude, <code>%LOC2</code> = longitude).</li>
+      <li>Add action: <strong>Net → HTTP Server → Response</strong><br>
+          Path: <code>/location</code><br>
+          MIME type: <code>application/json</code><br>
+          Body:
+          <code>{"lat":%LOC1,"lng":%LOC2,"speed":%LOCSPEED,"heading":%LOCBEAR}</code></li>
+    </ol>
+    <h3>Step 2 — Create task: G2 Stop Server</h3>
+    <ol>
+      <li>New task named <em>G2 Stop Server</em>.</li>
+      <li>Add action: <strong>Net → HTTP Server → Stop</strong>, Port <code>7272</code>.</li>
+    </ol>
+    <h3>Step 3 — Create task: G2 Update Location</h3>
+    <p>This task refreshes the server response whenever your location changes.</p>
+    <ol>
+      <li>New task named <em>G2 Update Location</em>.</li>
+      <li>Add action: <strong>Variable Split</strong>, Variable <code>%LOC</code>, Splitter <code>,</code>.</li>
+      <li>Add action: <strong>Net → HTTP Server → Response</strong><br>
+          Path: <code>/location</code><br>
+          MIME type: <code>application/json</code><br>
+          Body: <code>{"lat":%LOC1,"lng":%LOC2,"speed":%LOCSPEED,"heading":%LOCBEAR}</code></li>
+    </ol>
+    <h3>Step 4 — Create two profiles</h3>
+    <ol>
+      <li><strong>Profile: Even Hub open</strong><br>
+          Trigger: <em>App → Even Hub</em><br>
+          Enter task: <em>G2 Start Server</em><br>
+          Exit task: <em>G2 Stop Server</em></li>
+      <li><strong>Profile: Location changed</strong><br>
+          Trigger: <em>State → Location → GPS</em> (or "Net → Location")<br>
+          Task: <em>G2 Update Location</em></li>
+    </ol>
+    <p class="note">The app polls <code>http://127.0.0.1:7272/location</code> every 1–2 s and falls back to browser GPS automatically if Tasker is not running.</p>
+  </div>
+
   <div class="bottom-pad"></div>
 </div>
 
@@ -565,8 +681,9 @@
   if (MAPS_KEY) setGoogleMapsKey(MAPS_KEY)
 
   // ── Diagnostics ───────────────────────────────────────────────────────────
-  const debugLog = document.getElementById('debug-log')
-  const debugToggle = document.getElementById('debug-visible')
+  const debugLog     = document.getElementById('debug-log')
+  const debugToggle  = document.getElementById('debug-visible')
+  const debugSection = document.getElementById('debug-section')
 
   function setDebugVisible(on) {
     debugLog.style.display = on ? 'block' : 'none'
@@ -576,6 +693,23 @@
   // Restore saved state (default off)
   setDebugVisible(persistGet('g2maps_debug') === '1')
   debugToggle.addEventListener('change', () => setDebugVisible(debugToggle.checked))
+
+  // Restore debug section visibility (default hidden)
+  if (persistGet('g2maps_debug_section') === '1') debugSection.style.display = ''
+
+  // 5-second press-and-hold on the Adventure button toggles the debug section
+  let debugSectionTimer = null
+  function armDebugSectionToggle(el) {
+    el.addEventListener('pointerdown', () => {
+      debugSectionTimer = setTimeout(() => {
+        const visible = debugSection.style.display !== 'none'
+        debugSection.style.display = visible ? 'none' : ''
+        persistSet('g2maps_debug_section', visible ? '0' : '1')
+      }, 5000)
+    })
+    el.addEventListener('pointerup',    () => { clearTimeout(debugSectionTimer); debugSectionTimer = null })
+    el.addEventListener('pointerleave', () => { clearTimeout(debugSectionTimer); debugSectionTimer = null })
+  }
 
   function appendDebug(msg) {
     const line = document.createElement('div')
@@ -1039,6 +1173,7 @@
     settingsEls.advAvoidTolls.checked    = settingsEls.stdAvoidTolls.checked
     setProfileUI('adventure')
   })
+  armDebugSectionToggle(profileAdvBtn)
 
   // Live Stadia key feedback
   settingsEls.stadiaKey.addEventListener('input', () => {
