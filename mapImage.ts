@@ -298,7 +298,7 @@ function renderPixels(
   // Brightness = midpoint between current-step route (240) and background roads (40).
   {
     const [posX, posY] = toPixel(lat, lng)
-    const PV = 255
+    const PV = 140
     const shape = [
       [0,0,0,0,1,0,0,0,0],  // row 0  tip
       [0,0,0,1,1,1,0,0,0],  // row 1
@@ -312,10 +312,10 @@ function renderPixels(
       for (let col = 0; col < 9; col++)
         if (shape[row][col]) {
           // Each logical pixel → 2×2 block; centre (col 4, row 3) → (posX, posY)
-          forcePixel(posX + col*2 - 8, posY + row*2 - 6, PV)
-          forcePixel(posX + col*2 - 7, posY + row*2 - 6, PV)
-          forcePixel(posX + col*2 - 8, posY + row*2 - 5, PV)
-          forcePixel(posX + col*2 - 7, posY + row*2 - 5, PV)
+          setPixel(posX + col*2 - 8, posY + row*2 - 6, PV)
+          setPixel(posX + col*2 - 7, posY + row*2 - 6, PV)
+          setPixel(posX + col*2 - 8, posY + row*2 - 5, PV)
+          setPixel(posX + col*2 - 7, posY + row*2 - 5, PV)
         }
   }
 
