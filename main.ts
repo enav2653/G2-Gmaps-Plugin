@@ -51,8 +51,7 @@ let settings: HudSettings = loadSettings()
 let steps:       RouteStep[] = []
 let stepIdx      = 0
 let navState:    NavState    = 'passive'
-let bannerMode:  BannerMode  = 'always-on'
-let bannerModeIdx = 0
+const bannerMode: BannerMode = 'always-on'
 
 let currentLat = 0
 let currentLng = 0
@@ -1110,21 +1109,6 @@ function setupInput() {
         return
       }
 
-      // Single tap — cycle banner mode / resume from pause
-      case OsEventTypeList.CLICK_EVENT:
-      case undefined: {
-        if (!eventObj) return  // no event data — ignore
-        if (navState === 'paused') {
-          navState = 'navigating'
-          await buildPage()
-          return
-        }
-        bannerModeIdx = (bannerModeIdx + 1) % BANNER_MODES.length
-        bannerMode    = BANNER_MODES[bannerModeIdx]
-        await buildPage()
-        break
-      }
-
       // Double tap — invoke the standard EvenHub exit dialog from any state
       case OsEventTypeList.DOUBLE_CLICK_EVENT: {
         reportStatus('double-tap: calling shutDownPageContainer(1)')
@@ -1134,22 +1118,6 @@ function setupInput() {
         } catch (err) {
           reportStatus(`exit dialog error: ${String(err)}`)
         }
-        break
-      }
-
-      // Swipe up — previous step (manual preview)
-      case OsEventTypeList.SCROLL_TOP_EVENT: {
-        const cur = effectiveStepIdx()
-        if (!steps.length || cur <= 0) break
-        await changeStep(cur - 1)
-        break
-      }
-
-      // Swipe down — next step (manual preview)
-      case OsEventTypeList.SCROLL_BOTTOM_EVENT: {
-        const cur = effectiveStepIdx()
-        if (!steps.length || cur >= steps.length - 1) break
-        await changeStep(cur + 1)
         break
       }
     }
