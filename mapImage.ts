@@ -288,6 +288,15 @@ function renderPixels(
       [0,1,0,0,0,0,0,1,0],  // row 6  notch
     ]
     for (let row = 0; row < shape.length; row++)
+      for (let col = 0; col < 9; col++) {
+        // Clear every cell in the bounding box so the route can't show through
+        // the gaps in the chevron (wings notch, etc.)
+        forcePixel(posX + col*2 - 8, posY + row*2 - 6, 0)
+        forcePixel(posX + col*2 - 7, posY + row*2 - 6, 0)
+        forcePixel(posX + col*2 - 8, posY + row*2 - 5, 0)
+        forcePixel(posX + col*2 - 7, posY + row*2 - 5, 0)
+      }
+    for (let row = 0; row < shape.length; row++)
       for (let col = 0; col < 9; col++)
         if (shape[row][col]) {
           // Each logical pixel → 2×2 block; centre (col 4, row 3) → (posX, posY)
